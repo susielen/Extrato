@@ -4,66 +4,89 @@ import pdfplumber
 import io
 import re
 
-st.set_page_config(page_title="Conversor de Extrato Bancário", layout="wide")
+st.set_page_config(page_title="Conversor de Extrato MAIÚSCULO", layout="wide")
 
-st.title("📋 Meu Conversor de Extrato")
-st.write("Vou organizar seu extrato em: Data, Histórico, Débito (Saída) e Crédito (Entrada).")
+st.title("🤖 Robô de Extrato (Tudo em Maiúsculo)")
+st.write("Vou organizar seu extrato com a descrição completa e tudo em letras grandes.")
 
 arquivo_pdf = st.file_uploader("Suba o seu PDF aqui", type="pdf")
 
 if arquivo_pdf:
-    dados_extraidos = []
+    dados_finais = []
     
     with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
-            # Pegamos o texto bruto da página para não depender de tabelas invisíveis
-            texto_pagina = pagina.extract_text()
-            if texto_pagina:
-                linhas = texto_pagina.split('\n')
+            texto = pagina.extract_text()
+            if texto:
+                linhas = texto.split('\n')
+                data_atual = ""
+                historico_acumulado = ""
+                valor_pendente = ""
+
                 for linha in linhas:
-                    # O robô procura linhas que começam com Data (ex: 17/12 ou 17/12/2025)
-                    match_data = re.search(r'(\d{2}/\d{2}(?:/\d{2,4})?)', linha)
+                    # 1. Tenta achar uma data (ex: 17/12)
+                    match_data = re.search(r'^(\d{2}/\d{2})', linha)
                     
                     if match_data:
-                        data = match_data.group(1)
-                        # Removemos a data do texto para sobrar o resto
-                        resto = linha.replace(data, "").strip()
+                        # Salva o lançamento anterior antes de começar o novo
+                        if data_atual and historico_acumulado:
+                            dados_finais.append([data_atual, historico_acumulado.strip().upper(), valor_pendente])
                         
-                        # Procuramos valores (ex: 1.057,00 ou 60,00-)
-                        # Essa regra pega números que terminam ou começam com sinal
-                        valores = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2}-?|(?<=\s)-?\d{1,3}(?:\.\d{3})*,\d{2})', resto)
+                        data_atual = match_data.group(1)
+                        conteudo = linha.replace(data_atual, "").strip()
                         
-                        if valores:
-                            valor_principal = valores[-1] # Geralmente o último valor da linha é o da transação
-                            historico = resto.replace(valor_principal, "").strip()
-                            
-                            debito = ""
-                            credito = ""
-                            
-                            # REGRA: Se tem o tracinho "-", é DÉBITO (Saída). Se não, é CRÉDITO (Entrada).
-                            if "-" in valor_principal:
-                                debito = valor_principal.replace("-", "").strip()
+                        # 2. Procura o valor financeiro
+                        match_valor = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2}-?)', conteudo)
+                        if match_valor:
+                            valor_pendente = match_valor.group(1)
+                            historico_acumulado = conteudo.replace(valor_pendente, "").strip()
+                        else:
+                            valor_pendente = ""
+                            historico_acumulado = conteudo
+                    else:
+                        # Continuação do histórico (ex: nome da pessoa abaixo do PIX)
+                        if data_atual:
+                            match_valor_cont = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2}-?)', linha)
+                            if match_valor_cont:
+                                valor_pendente = match_valor_cont.group(1)
+                                historico_acumulado += " " + linha.replace(valor_pendente, "").strip()
                             else:
-                                credito = valor_principal.strip()
-                            
-                            dados_extraidos.append([data, historico, debito, credito])
+                                historico_acumulado += " " + linha.strip()
 
-    if dados_extraidos:
-        df = pd.DataFrame(dados_extraidos, columns=["Data", "Histórico", "Débito (Saída)", "Crédito (Entrada)"])
+                if data_atual:
+                    dados_finais.append([data_atual, historico_acumulado.strip().upper(), valor_pendente])
+
+    if dados_finais:
+        tabela_organizada = []
+        for lancamento in dados_finais:
+            dt, hist, val = lancamento
+            debito = ""
+            credito = ""
+            
+            # Regra de Entrada/Saída
+            if "-" in val:
+                debito = val.replace("-", "").strip()
+            elif val != "":
+                credito = val.strip()
+            
+            # Colocamos TUDO em maiúsculo aqui antes de mandar para a lista
+            tabela_organizada.append([dt, hist, debito, credito])
+
+        df = pd.DataFrame(tabela_organizada, columns=["DATA", "HISTÓRICO", "DÉBITO (SAÍDA)", "CRÉDITO (ENTRADA)"])
         
-        st.success(f"Consegui ler {len(df)} lançamentos!")
+        # Garante que até os títulos e textos da planilha fiquem em maiúsculo
+        df = df.astype(str).apply(lambda x: x.str.upper())
+
+        st.success("Tabela gerada com sucesso e tudo em MAIÚSCULO!")
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-        # Botão para o Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Extrato')
+            df.to_excel(writer, index=False, sheet_name='EXTRATO')
         
         st.download_button(
-            label="📥 Baixar Planilha Pronta",
+            label="📥 BAIXAR PLANILHA EM EXCEL",
             data=output.getvalue(),
-            file_name="extrato_dia_a_dia.xlsx",
+            file_name="EXTRATO_MAIUSCULO.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    else:
-        st.error("O robô ainda não conseguiu ler. Pode ser que esse PDF seja uma imagem ou foto.")
