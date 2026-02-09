@@ -3,95 +3,103 @@ import pandas as pd
 import pdfplumber
 import io
 import re
-from datetime import datetime
 
-st.set_page_config(page_title="CONVERSOR CAIXA ORGANIZADO", layout="wide")
+# Título do Robô
+st.set_page_config(page_title="CONVERSOR CAIXA FINAL", layout="wide")
+st.title("🤖 MEU ROBÔ DA CAIXA")
+st.write("ORGANIZO TUDO: DATAS EM ORDEM, HISTÓRICO COMPLETO E SALDO SÓ NO FIM DO DIA.")
 
-st.title("🤖 ROBÔ CAIXA: DIA A DIA")
-st.write("ORDENANDO POR DATA E MOSTRANDO O SALDO FINAL DE CADA DIA.")
-
-arquivo_pdf = st.file_uploader("SUBA O EXTRATO DA CAIXA AQUI", type="pdf")
+arquivo_pdf = st.file_uploader("COLOQUE O EXTRATO DA CAIXA AQUI", type="pdf")
 
 if arquivo_pdf:
-    dados_brutos = []
+    dados_lista = []
     
     with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
             texto = pagina.extract_text()
             if texto:
                 linhas = texto.split('\n')
-                data_atual, hist_acumulado, val_curr, saldo_curr = "", "", "", ""
+                dt_atual, hist_acum, v_pend, s_pend = "", "", "", ""
 
                 for linha in linhas:
-                    # 1. BUSCA DATA (EX: 20/02/2025)
-                    match_data = re.search(r'(\d{2}/\d{2}/\d{4})', linha)
+                    # BUSCA DATA NO FORMATO DA CAIXA (DIA/MÊS/ANO) 
+                    match_dt = re.search(r'(\d{2}/\d{2}/\d{4})', linha)
                     
-                    if match_data:
-                        if data_atual and (val_curr or saldo_curr):
-                            dados_brutos.append({"DATA": data_atual, "HIST": hist_acumulado, "VAL": val_curr, "SALDO": saldo_curr})
+                    if match_dt:
+                        # SALVA O QUE JÁ TINHA ANTES DE COMEÇAR UM NOVO DIA
+                        if dt_atual:
+                            dados_lista.append([dt_atual, hist_acum.strip().upper(), v_pend, s_pend])
                         
-                        data_atual = match_data.group(1)
-                        # PEGA VALORES COM C/D OU SINAL (-)
-                        valores = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2}\s?[CD-]?|(?<=\s)-?\d{1,3}(?:\.\d{3})*,\d{2})', linha)
+                        dt_atual = match_dt.group(1)
+                        # PROCURA VALORES COM C, D OU SINAL DE MENOS 
+                        v_achados = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2}\s?[CD-]?|(?<=\s)-?\d{1,3}(?:\.\d{3})*,\d{2})', linha)
                         
-                        if len(valores) >= 2:
-                            val_curr, saldo_curr = valores[-2], valores[-1]
-                        elif len(valores) == 1:
-                            val_curr, saldo_curr = valores[0], ""
+                        if len(v_achados) >= 2:
+                            v_pend, s_pend = v_achados[-2], v_achados[-1]
+                        elif len(v_achados) == 1:
+                            v_pend, s_pend = v_achados[0], ""
                         else:
-                            val_curr, saldo_curr = "", ""
+                            v_pend, s_pend = "", ""
                         
-                        temp_h = linha.replace(data_atual, "")
-                        for v in valores: temp_h = temp_h.replace(v, "")
-                        hist_acumulado = re.sub(r'\d{6,}', '', temp_h).strip()
+                        # LIMPA O NÚMERO DO DOCUMENTO E VALORES DO HISTÓRICO
+                        limpo = linha.replace(dt_atual, "")
+                        for va in v_achados: limpo = limpo.replace(va, "")
+                        hist_acum = re.sub(r'\d{6}', '', limpo).strip()
                     else:
-                        if data_atual:
+                        # SE NÃO TEM DATA, É O NOME DA PESSOA (FAVORECIDO) 
+                        if dt_atual:
                             v_cont = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2}\s?[CD-]?|(?<=\s)-?\d{1,3}(?:\.\d{3})*,\d{2})', linha)
-                            t_limpo = linha
-                            for v in v_cont: t_limpo = t_limpo.replace(v, "")
-                            hist_acumulado += " " + t_limpo.strip()
+                            t_cont = linha
+                            for vc in v_cont: t_cont = t_cont.replace(vc, "")
+                            hist_acum += " " + t_cont.strip()
                             if v_cont:
-                                if not val_curr: val_curr = v_cont[0]
-                                if len(v_cont) > 1 or not saldo_curr: saldo_curr = v_cont[-1]
+                                if not v_pend: v_pend = v_cont[0]
+                                s_pend = v_cont[-1]
 
-                if data_atual:
-                    dados_brutos.append({"DATA": data_atual, "HIST": hist_acumulado, "VAL": val_curr, "SALDO": saldo_curr})
+                # NÃO ESQUECE O ÚLTIMO LANÇAMENTO
+                if dt_atual:
+                    dados_lista.append([dt_atual, hist_acum.strip().upper(), v_pend, s_pend])
 
-    if dados_brutos:
-        # CRIANDO O DATAFRAME
-        df = pd.DataFrame(dados_brutos)
+    if dados_lista:
+        df = pd.DataFrame(dados_lista, columns=["DATA", "HISTORICO", "VALOR", "SALDO_BRUTO"])
         
-        # CONVERTE DATA PARA ORDENAR CERTO
-        df['DT_OBJ'] = pd.to_datetime(df['DATA'], format='%d/%m/%Y')
-        df = df.sort_values(by='DT_OBJ').reset_index(drop=True)
+        # COLOCA AS DATAS NA ORDEM CERTA (DIA 01, 02, 03...)
+        df['DT_AUX'] = pd.to_datetime(df['DATA'], format='%d/%m/%Y')
+        df = df.sort_values(by='DT_AUX').reset_index(drop=True)
 
-        tabela_limpa = []
-        # LOGICA PARA MANTER SALDO SÓ NO ÚLTIMO LANÇAMENTO DO DIA
+        final_rows = []
         for i in range(len(df)):
-            d = df.iloc[i]['DATA']
-            h = df.iloc[i]['HIST'].upper()
-            v = df.iloc[i]['VAL'].upper().replace(" ", "")
-            s = df.iloc[i]['SALDO'].upper().replace(" ", "")
+            d, h = df.iloc[i]['DATA'], df.iloc[i]['HISTORICO']
+            v = str(df.iloc[i]['VALOR']).upper().replace(" ", "")
+            s = str(df.iloc[i]['SALDO_BRUTO']).upper().replace(" ", "")
             
-            # SÓ MOSTRA O SALDO SE FOR A ÚLTIMA LINHA DO DIA OU A ÚLTIMA DA TABELA
-            saldo_final = s if (i == len(df)-1 or d != df.iloc[i+1]['DATA']) else ""
+            # SÓ MOSTRA O SALDO SE FOR A ÚLTIMA LINHA DAQUELE DIA 
+            saldo_dia = s if (i == len(df)-1 or d != df.iloc[i+1]['DATA']) else ""
             
-            debito, credito = "", ""
+            deb, cred = "", ""
             if "D" in v or "-" in v:
-                debito = v.replace("D", "").replace("-", "").strip()
-            elif "C" in v and "0,00" not in v:
-                credito = v.replace("C", "").strip()
-            elif v and "C" not in v and "D" not in v and "-" not in v:
-                credito = v.strip()
+                deb = v.replace("D", "").replace("-", "").strip()
+            else:
+                cred = v.replace("C", "").strip()
+            
+            if h != "" or v != "":
+                final_rows.append([d, h, deb, cred, saldo_dia])
 
-            tabela_limpa.append([d, h, debito, credito, saldo_final])
-
-        df_final = pd.DataFrame(tabela_limpa, columns=["DATA", "HISTÓRICO", "DÉBITO", "CRÉDITO", "SALDO DO DIA"])
+        df_final = pd.DataFrame(final_rows, columns=["DATA", "HISTÓRICO", "DÉBITO", "CRÉDITO", "SALDO FINAL"])
         
-        st.success("PLANILHA ORDENADA E LIMPA!")
+        st.success("CONSEGUI! AQUI ESTÁ SUA PLANILHA:")
         st.dataframe(df_final, use_container_width=True, hide_index=True)
 
+        # AGORA O BOTÃO DE BAIXAR SEMPRE APARECE
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_final.to_excel(writer, index=False, sheet_name='EXTRATO')
-        st.download_button("📥 BAIXAR EXCEL ORGANIZADO", output.getvalue(), "extrato_caixa_ordenado.xlsx")
+        
+        st.download_button(
+            label="📥 CLIQUE AQUI PARA BAIXAR O EXCEL",
+            data=output.getvalue(),
+            file_name="extrato_caixa_perfeito.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.error("NÃO ENCONTREI NADA NO PDF. VERIFIQUE SE ELE NÃO É UMA FOTO.")
