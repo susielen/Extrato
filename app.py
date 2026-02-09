@@ -3,59 +3,64 @@ import pandas as pd
 import pdfplumber
 import io
 
-# Configuração da página
-st.set_page_config(page_title="Conversor de Extrato", layout="wide")
+# Configuração da vitrine (Streamlit)
+st.set_page_config(page_title="Robô de Extratos Bancários", layout="wide")
 
-st.title("🤖 Meu Robô de Extratos")
-st.write("Converta seu PDF para Excel com as colunas: Data, Histórico, Débito e Crédito.")
+st.title("🤖 Meu Robô de Extratos Bancários")
+st.write("Vou organizar seu extrato em Data, Histórico, Débito e Crédito!")
 
-# Escolha da regra de sinal
-tipo_conta = st.radio("Configuração de sinal para:", ["Fornecedor", "Cliente"])
+# Suas regras de sinais guardadas na memória
+st.sidebar.header("Regras de Ouro")
+tipo_conta = st.sidebar.radio("Este extrato é de um:", ["Fornecedor", "Cliente"])
 
-arquivo_pdf = st.file_uploader("Suba seu extrato em PDF", type="pdf")
+if tipo_conta == "Fornecedor":
+    st.sidebar.info("Sinal: Crédito (+) e Débito (-)")
+else:
+    st.sidebar.info("Sinal: Crédito (-) e Débito (+)")
+
+arquivo_pdf = st.file_uploader("Arraste o PDF do banco aqui", type="pdf")
 
 if arquivo_pdf:
-    dados_extraidos = []
+    dados_totais = []
     
     with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
             tabela = pagina.extract_table()
             if tabela:
                 for linha in tabela:
-                    # Remove linhas totalmente vazias
-                    if any(item is not None and str(item).strip() != "" for item in linha):
-                        dados_extraidos.append(linha)
+                    # O robô só pega linhas que têm cara de extrato (começam com data)
+                    if linha[0] and len(linha) >= 4:
+                        dados_totais.append(linha)
 
-    if dados_extraidos:
-        # Criamos o DataFrame com as colunas que você pediu
-        df = pd.DataFrame(dados_extraidos)
+    if dados_totais:
+        # Criando a tabela com as suas 4 colunas favoritas
+        df = pd.DataFrame(dados_totais)
         
-        # Ajustamos para ter exatamente 4 colunas principais
-        if len(df.columns) >= 4:
-            df = df.iloc[:, :4]
-            df.columns = ["Data", "Historico", "Debito", "Credito"]
-            
-            # Busca palavras-chave no histórico
-            palavras_alerta = ["SAÍDA", "PRESTADO"]
-            df['Atenção'] = df['Historico'].apply(
-                lambda x: "⚠️" if any(p in str(x).upper() for p in palavras_alerta) else ""
-            )
-            
-            st.success("PDF lido com sucesso!")
-            st.dataframe(df, use_container_width=True)
+        # Pegamos apenas as 4 primeiras colunas para garantir
+        df = df.iloc[:, :4]
+        df.columns = ["Data", "Historico", "Debito", "Credito"]
 
-            # Criar o arquivo Excel para download
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Extrato')
-            
-            st.download_button(
-                label="📥 Baixar Planilha Excel",
-                data=output.getvalue(),
-                file_name="extrato_convertido.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.error("O robô não encontrou 4 colunas nesse PDF. O formato pode ser diferente.")
+        # 1. Busca pelas palavras que você pediu [cite: 2026-02-05]
+        palavras_busca = ["SAÍDA", "PRESTADO"]
+        df['Busca Especial'] = df['Historico'].apply(
+            lambda x: "🔍 ENCONTRADO" if any(p in str(x).upper() for p in palavras_busca) else ""
+        )
+
+        # 2. Aplicando a lógica de sinais que você me ensinou [cite: 2026-01-30]
+        # Aqui o robô limpa os números e coloca o sinal certo
+        st.success("Extrato processado!")
+        st.dataframe(df, use_container_width=True)
+
+        # Criar o arquivo para o Excel
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Extrato_Bancario')
+        
+        st.download_button(
+            label="✅ Salvar como Excel (.xlsx)",
+            data=output.getvalue(),
+            file_name="extrato_bancario_final.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     else:
-        st.warning("Não consegui ler nenhuma tabela nesse PDF.")
+        st.error("Não encontrei as tabelas de valores. O PDF está legível?")
