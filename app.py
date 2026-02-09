@@ -4,12 +4,12 @@ import pdfplumber
 import io
 import re
 
-st.set_page_config(page_title="MEU ROBÔ VOLTOU", layout="wide")
+st.set_page_config(page_title="ROBÔ ORGANIZADOR", layout="wide")
 
-st.title("🤖 ROBÔ DE EXTRATO (VERSÃO ESTÁVEL)")
-st.write("VOLTAMOS AO JEITO QUE LÊ TUDO: DATA, HISTÓRICO COMPLETO E SALDO NO FIM DO DIA.")
+st.title("🤖 ROBÔ DE EXTRATO (DATAS EM ORDEM)")
+st.write("LENDO TUDO E ORGANIZANDO POR DIA, COM SALDO SÓ NO FIM DA JORNADA.")
 
-arquivo_pdf = st.file_uploader("COLOQUE O SEU PDF AQUI", type="pdf")
+arquivo_pdf = st.file_uploader("SUBA O SEU PDF AQUI", type="pdf")
 
 if arquivo_pdf:
     dados_lista = []
@@ -28,7 +28,7 @@ if arquivo_pdf:
                     if match_dt:
                         # ANTES DE COMEÇAR NOVO, SALVA O ANTERIOR
                         if data_curr and (val_curr or saldo_curr):
-                            dados_lista.append([data_curr, hist_curr.strip().upper(), val_curr, saldo_curr])
+                            dados_lista.append({"DATA": data_curr, "HIST": hist_curr.strip().upper(), "VAL": val_curr, "SALDO": saldo_curr})
                         
                         data_curr = match_dt.group(1)
                         # BUSCA VALORES (PEGA NÚMEROS COM VÍRGULA, COM '-' OU 'C/D')
@@ -56,28 +56,33 @@ if arquivo_pdf:
                                 saldo_curr = v_cont[-1]
 
                 if data_curr:
-                    dados_lista.append([data_curr, hist_curr.strip().upper(), val_curr, saldo_curr])
+                    dados_lista.append({"DATA": data_curr, "HIST": hist_curr.strip().upper(), "VAL": val_curr, "SALDO": saldo_curr})
 
     if dados_lista:
-        df = pd.DataFrame(dados_lista, columns=["DATA", "HISTORICO", "VALOR", "SALDO_B"])
+        df = pd.DataFrame(dados_lista)
         
-        # COLOCA AS DATAS NA ORDEM CERTA
+        # --- AQUI ESTÁ A MÁGICA DA ORDEM ---
+        # Converte para data de verdade para o computador saber quem vem primeiro
         df['DT_AUX'] = pd.to_datetime(df['DATA'], format='%d/%m/%Y', errors='coerce')
+        # Se não tiver o ano (como no Santander), ele coloca o ano atual
         if df['DT_AUX'].isnull().any():
-            df['DT_AUX'] = pd.to_datetime(df['DATA'] + '/2025', format='%d/%m', errors='coerce')
+            df['DT_AUX'] = pd.to_datetime(df['DATA'] + '/2025', format='%d/%m/%Y', errors='coerce')
         
+        # Coloca em ordem crescente (01, 02, 03...)
         df = df.sort_values(by='DT_AUX').reset_index(drop=True)
 
         final_rows = []
         for i in range(len(df)):
-            d, h = df.iloc[i]['DATA'], df.iloc[i]['HISTORICO']
-            v = str(df.iloc[i]['VALOR']).upper().replace(" ", "")
-            s = str(df.iloc[i]['SALDO_B']).upper().replace(" ", "")
+            d, h = df.iloc[i]['DATA'], df.iloc[i]['HIST']
+            v = str(df.iloc[i]['VAL']).upper().replace(" ", "")
+            s = str(df.iloc[i]['SALDO']).upper().replace(" ", "")
             
-            # SALDO SÓ NO FIM DO DIA
+            # SALDO SÓ NO FIM DO DIA:
+            # Se a próxima linha for uma data diferente, ou se for a última linha da tabela
             saldo_dia = s if (i == len(df)-1 or d != df.iloc[i+1]['DATA']) else ""
             
             deb, cred = "", ""
+            # Regras de Crédito e Débito (conforme sua instrução)
             if "-" in v or "D" in v:
                 deb = v.replace("-", "").replace("D", "").strip()
             else:
@@ -88,10 +93,10 @@ if arquivo_pdf:
 
         df_final = pd.DataFrame(final_rows, columns=["DATA", "HISTÓRICO", "DÉBITO", "CRÉDITO", "SALDO FINAL"])
         
-        st.success("CONSEGUI! TUDO VOLTOU AO NORMAL.")
+        st.success("TUDO ORGANIZADO POR DATA!")
         st.dataframe(df_final, use_container_width=True, hide_index=True)
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_final.to_excel(writer, index=False, sheet_name='EXTRATO')
-        st.download_button("📥 BAIXAR EXCEL AGORA", output.getvalue(), "extrato_restaurado.xlsx")
+        st.download_button("📥 BAIXAR EXCEL ORDENADO", output.getvalue(), "extrato_ordenado.xlsx")
