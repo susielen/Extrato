@@ -76,21 +76,34 @@ if arquivo_pdf:
             fmt_grade = workbook.add_format({'border': 1})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
-            # Formato Cinza com Borda (usado no Banco e nos Títulos da Tabela)
+            
+            # Formato para os Títulos da Tabela
             fmt_cabecalho = workbook.add_format({
                 'bold': True, 
                 'bg_color': '#EAEAEA', 
                 'border': 1,
-                'font_color': '#000000'
+                'font_color': '#000000',
+                'align': 'center',
+                'valign': 'vcenter'
+            })
+
+            # Formato específico para o Banco (B e C mesclados e centralizados)
+            fmt_banco_titulo = workbook.add_format({
+                'bold': True, 
+                'bg_color': '#EAEAEA', 
+                'border': 1,
+                'font_color': '#000000',
+                'align': 'center',   # Centraliza horizontalmente
+                'valign': 'vcenter'  # Centraliza verticalmente
             })
 
             # 1. Margens
-            worksheet.set_row(0, 15)       # Linha 1 vazia
-            worksheet.set_column('A:A', 2) # Coluna A vazia
+            worksheet.set_row(0, 15)       
+            worksheet.set_column('A:A', 2) 
             worksheet.hide_gridlines(2)
 
-            # 2. Título do Banco (Mesclado, Cinza e com Borda)
-            worksheet.merge_range('B2:D2', f"BANCO: {nome_banco}", fmt_cabecalho)
+            # 2. Título do Banco (Mesclado apenas em B2:C2 e Centralizado)
+            worksheet.merge_range('B2:C2', f"BANCO: {nome_banco}", fmt_banco_titulo)
 
             # 3. Ajuste de Colunas
             worksheet.set_column('B:B', 12)
