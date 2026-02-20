@@ -15,8 +15,25 @@ def processar_valor_unico(texto_valor):
     except:
         return None
 
-# --- Interface Streamlit ---
+# --- CONFIGURAÇÃO VISUAL AZUL CLARO ---
 st.set_page_config(page_title="Robô de Extratos", layout="centered")
+
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #E3F2FD; 
+    }
+    h1 {
+        color: #1565C0; 
+    }
+    .stButton>button {
+        background-color: #1976D2;
+        color: white;
+        border-radius: 10px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("🤖 Conversor de Extrato Bancário")
 
 col_emp, col_ban = st.columns(2)
@@ -60,57 +77,44 @@ if arquivo_pdf:
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Escrevemos os dados começando na coluna B (índice 1)
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
-            
             workbook = writer.book
             worksheet = writer.sheets['Extrato']
             
-            # --- Formatos ---
             fmt_negrito = workbook.add_format({'bold': True, 'border': 1})
             fmt_grade = workbook.add_format({'border': 1})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
             fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#EAEAEA', 'border': 1})
 
-            # 1. Margem: Coluna A bem estreita e vazia
             worksheet.set_column('A:A', 2) 
-            
-            # 2. Títulos (agora na coluna B)
             worksheet.write('B1', f"EMPRESA: {nome_empresa}", fmt_negrito)
             worksheet.write('B2', f"BANCO: {nome_banco}", fmt_negrito)
-
-            # 3. Esconder grades de fundo
             worksheet.hide_gridlines(2)
 
-            # 4. Ajuste de Colunas (B em diante)
-            worksheet.set_column('B:B', 12) # Data
-            worksheet.set_column('C:C', 45) # Histórico
-            worksheet.set_column('D:D', 15) # Valor
-            worksheet.set_column('E:H', 15) # Extras
+            worksheet.set_column('B:B', 12)
+            worksheet.set_column('C:C', 45)
+            worksheet.set_column('D:D', 15)
+            worksheet.set_column('E:H', 15)
 
-            # 5. Formatar cabeçalho da tabela manualmente na linha 4 (índice 3), coluna B (índice 1)
             colunas = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(colunas):
                 worksheet.write(3, col_num + 1, titulo, fmt_cabecalho)
 
-            # 6. Preencher dados com bordas e cores
             for i, row in df.iterrows():
                 row_idx = i + 4
                 worksheet.write(row_idx, 1, row['Data'], fmt_grade)
                 worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
-                
                 valor = row['Valor']
                 fmt_v = fmt_vermelho if valor < 0 else fmt_verde
                 worksheet.write_number(row_idx, 3, valor, fmt_v)
-                
-                # Colunas vazias com grade
                 for col_extra in range(4, 8):
                     worksheet.write(row_idx, col_extra, "", fmt_grade)
 
+        # AGORA O NOME DO ARQUIVO É APENAS O BANCO
         st.download_button(
-            label="📥 Baixar Planilha Final com Margem",
+            label="📥 Baixar Planilha Final",
             data=output.getvalue(),
-            file_name=f"Extrato_{nome_empresa}.xlsx",
+            file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
