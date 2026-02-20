@@ -17,7 +17,7 @@ def processar_valor_unico(texto_valor):
         return None
 
 # --- CSS PARA AZUL TOTAL NO STREAMLIT ---
-st.set_page_config(page_title="🧾Extratos", layout="centered")
+st.set_page_config(page_title="🧾Extratos", page_icon="📇", layout="centered")
 
 st.markdown("""
     <style>
