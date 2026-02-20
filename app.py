@@ -1,101 +1,95 @@
 import streamlit as st
-import pandas as pd
 import pdfplumber
-import io
+import pandas as pd
 import re
+import io
 
-st.set_page_config(page_title="ROBÔ BANCÁRIO UNIVERSAL", layout="wide")
+def extrair_valor(texto):
+    if not texto: return 0.0, "C"
+    texto_limpo = str(texto).upper().replace('R$', '').strip()
+    e_saida = '-' in texto_limpo or 'D' in texto_limpo
+    apenas_numeros = re.sub(r'[^\d,]', '', texto_limpo)
+    try:
+        valor_float = float(apenas_numeros.replace(',', '.'))
+    except:
+        valor_float = 0.0
+    return valor_float, "D" if e_saida else "C"
 
-st.title("🤖 ROBÔ MULTI-BANCOS")
-st.write("ORGANIZADO: DATAS EM ORDEM, HISTÓRICO COMPLETO E REGRAS DE C/D OU SINAL (+/-).")
+# --- INTERFACE STREAMLIT ---
+st.set_page_config(page_title="Robô de Extratos Pro", layout="wide")
+st.title("🤖 Robô de Extratos Bancários")
 
-arquivo_pdf = st.file_uploader("SUBA O SEU PDF (CAIXA, SANTANDER, ITAÚ, ETC.)", type="pdf")
+# Sidebar para informações da Empresa e Banco
+st.sidebar.header("📋 Identificação")
+nome_empresa = st.sidebar.text_input("Nome da Empresa", "Minha Empresa Ltda")
+nome_banco = st.sidebar.text_input("Nome do Banco", "Banco Exemplo")
+
+arquivo_pdf = st.file_uploader("Suba o PDF do extrato", type=["pdf"])
 
 if arquivo_pdf:
-    dados_brutos = []
-    
+    # 1. Leitura Inicial para mapeamento de colunas
     with pdfplumber.open(arquivo_pdf) as pdf:
-        for pagina in pdf.pages:
-            texto = pagina.extract_text()
-            if texto:
-                linhas = texto.split('\n')
-                data_curr, hist_curr, val_curr, saldo_curr = "", "", "", ""
-
-                for linha in linhas:
-                    # 1. BUSCA DATA (EX: 28/02/2025 OU 28/02)
-                    match_dt = re.search(r'(\d{2}/\d{2}(?:/\d{4})?)', linha)
-                    
-                    if match_dt:
-                        # SALVA O LANÇAMENTO ANTERIOR ANTES DE COMEÇAR NOVO
-                        if data_curr and (val_curr or saldo_curr):
-                            dados_brutos.append({"DATA": data_curr, "HIST": hist_curr.strip().upper(), "VAL": val_curr, "SALDO": saldo_curr})
-                        
-                        data_curr = match_dt.group(1)
-                        # BUSCA VALORES (RECONHECE NÚMEROS COM , E SINAIS/LETRAS AO LADO)
-                        v_achados = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2}\s?[CD-]?|(?<=\s)-?\d{1,3}(?:\.\d{3})*,\d{2})', linha)
-                        
-                        if len(v_achados) >= 2:
-                            val_curr, saldo_curr = v_achados[-2], v_achados[-1]
-                        elif len(v_achados) == 1:
-                            val_curr, saldo_curr = v_achados[0], ""
-                        else:
-                            val_curr, saldo_curr = "", ""
-                        
-                        temp_h = linha.replace(data_curr, "")
-                        for v in v_achados: temp_h = temp_h.replace(v, "")
-                        hist_curr = re.sub(r'\d{6,}', '', temp_h).strip()
-                    else:
-                        if data_curr:
-                            # CONTINUAÇÃO DO HISTÓRICO (NOME DA PESSOA ABAIXO)
-                            v_cont = re.findall(r'(\d{1,3}(?:\.\d{3})*,\d{2}\s?[CD-]?|(?<=\s)-?\d{1,3}(?:\.\d{3})*,\d{2})', linha)
-                            t_limpo = linha
-                            for v in v_cont: t_limpo = t_limpo.replace(v, "")
-                            hist_curr += " " + t_limpo.strip()
-                            if v_cont:
-                                if not val_curr: val_curr = v_cont[0]
-                                saldo_curr = v_cont[-1]
-
-                if data_curr:
-                    dados_brutos.append({"DATA": data_curr, "HIST": hist_curr.strip().upper(), "VAL": val_curr, "SALDO": saldo_curr})
-
-    if dados_brutos:
-        df = pd.DataFrame(dados_brutos)
+        primeira_pagina = pdf.pages[0].extract_table()
         
-        # --- GARANTE AS DATAS EM ORDEM (01, 02, 03...) ---
-        df['DT_AUX'] = pd.to_datetime(df['DATA'], format='%d/%m/%Y', errors='coerce')
-        if df['DT_AUX'].isnull().any():
-            df['DT_AUX'] = pd.to_datetime(df['DATA'] + '/2025', format='%d/%m/%Y', errors='coerce')
+    if primeira_pagina:
+        st.subheader("⚙️ Configuração de Colunas")
+        colunas_exemplo = primeira_pagina[0] # Pega o cabeçalho detectado
         
-        df = df.sort_values(by='DT_AUX').reset_index(drop=True)
+        c1, c2, c3 = st.columns(3)
+        with c1: idx_data = st.selectbox("Coluna da DATA", range(len(colunas_exemplo)), format_func=lambda x: f"Coluna {x}: {colunas_exemplo[x]}")
+        with c2: idx_hist = st.selectbox("Coluna do HISTÓRICO", range(len(colunas_exemplo)), format_func=lambda x: f"Coluna {x}: {colunas_exemplo[x]}", index=1)
+        with c3: idx_valor = st.selectbox("Coluna do VALOR", range(len(colunas_exemplo)), format_func=lambda x: f"Coluna {x}: {colunas_exemplo[x]}", index=2)
 
-        tabela_final = []
-        for i in range(len(df)):
-            d, h = df.iloc[i]['DATA'], df.iloc[i]['HIST']
-            v = str(df.iloc[i]['VAL']).upper().replace(" ", "")
-            s = str(df.iloc[i]['SALDO']).upper().replace(" ", "")
+        if st.button("🚀 Processar Extrato"):
+            dados_finais = []
             
-            # MOSTRA O SALDO APENAS NO ÚLTIMO LANÇAMENTO DO DIA
-            saldo_dia = s if (i == len(df)-1 or d != df.iloc[i+1]['DATA']) else ""
-            
-            deb, cred = "", ""
-            # APLICAÇÃO DAS REGRAS UNIVERSAIS (CAIXA, BB, ITAÚ, SANTANDER)
-            if "D" in v or "-" in v:
-                deb = v.replace("D", "").replace("-", "").strip()
-            elif "C" in v:
-                cred = v.replace("C", "").strip()
-            elif v != "" and "0,00" not in v:
-                # Caso sem sinal/letra (assume crédito se não tiver indicador de débito)
-                cred = v.strip()
-            
-            if h and (deb or cred):
-                tabela_final.append([d, h, deb, cred, saldo_dia])
+            with pdfplumber.open(arquivo_pdf) as pdf:
+                for pagina in pdf.pages:
+                    tabela = pagina.extract_table()
+                    if tabela:
+                        for linha in tabela:
+                            try:
+                                # Pular linhas que não têm data válida (ajuste conforme o banco)
+                                if not linha[idx_data] or len(str(linha[idx_data])) < 5: continue
+                                
+                                valor_num, tipo = extrair_valor(linha[idx_valor])
+                                
+                                dados_finais.append({
+                                    'Data': pd.to_datetime(linha[idx_data], dayfirst=True, errors='coerce'),
+                                    'Histórico': linha[idx_hist],
+                                    'Débito': valor_num if tipo == "D" else None,
+                                    'Crédito': valor_num if tipo == "C" else None
+                                })
+                            except: continue
 
-        df_final = pd.DataFrame(tabela_final, columns=["DATA", "HISTÓRICO", "DÉBITO (SAÍDA)", "CRÉDITO (ENTRADA)", "SALDO FINAL"])
-        
-        st.success("PLANILHA PRONTA E ORGANIZADA!")
-        st.dataframe(df_final, use_container_width=True, hide_index=True)
+            # Criar DataFrame e Ordenar por Data
+            df = pd.DataFrame(dados_finais)
+            df = df.dropna(subset=['Data']).sort_values(by='Data')
+            df['Data'] = df['Data'].dt.strftime('%d/%m/%Y') # Formata para o Excel
 
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_final.to_excel(writer, index=False, sheet_name='EXTRATO')
-        st.download_button("📥 BAIXAR EXCEL AGORA", output.getvalue(), "extrato_universal.xlsx")
+            # 2. Exibição e Download
+            st.divider()
+            st.subheader(f"📊 Resultado: {nome_empresa} - {nome_banco}")
+            st.dataframe(df, use_container_width=True)
+
+            # Gerar Excel com Título
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                # Criar cabeçalho customizado
+                df_titulo = pd.DataFrame([[f"EMPRESA: {nome_empresa}"], [f"BANCO: {nome_banco}"], [""]])
+                df_titulo.to_excel(writer, index=False, header=False, startrow=0)
+                
+                # Dados começam na linha 4
+                df.to_excel(writer, index=False, startrow=4, sheet_name='Extrato')
+                
+                # Ajuste de largura das colunas
+                worksheet = writer.sheets['Extrato']
+                for i, col in enumerate(df.columns):
+                    worksheet.set_column(i, i, 20)
+
+            st.download_button(
+                label="📥 Baixar Planilha Excel Ordenada",
+                data=output.getvalue(),
+                file_name=f"Extrato_{nome_empresa}_{nome_banco}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
