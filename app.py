@@ -52,8 +52,12 @@ if arquivo_pdf:
                     partes = resto.split()
                     if len(partes) >= 2:
                         valor_bruto = partes[-1]
-                        # AQUI: Transformando o histórico em MAIÚSCULO
-                        historico = " ".join(partes[:-1]).upper() 
+                        
+                        # Limpeza do histórico
+                        historico = " ".join(partes[:-1]).strip()
+                        if historico.endswith("-"):
+                            historico = historico[:-1].strip()
+                        historico = historico.upper()
                         
                         valor_final = processar_valor_unico(valor_bruto)
                         if valor_final is not None:
@@ -76,8 +80,12 @@ if arquivo_pdf:
             
             # --- FORMATOS ---
             fmt_grade = workbook.add_format({'border': 1})
+            # Formato específico para centralizar a Data
+            fmt_data = workbook.add_format({'border': 1, 'align': 'center'})
+            
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
+            
             fmt_cabecalho = workbook.add_format({
                 'bold': True, 'bg_color': '#EAEAEA', 'border': 1,
                 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter'
@@ -93,41 +101,46 @@ if arquivo_pdf:
             worksheet.set_column('B:B', 12) # Data
             worksheet.set_column('C:C', 45) # Histórico
             worksheet.set_column('D:D', 15) # Valor
-            worksheet.set_column('E:H', 25) # Colunas de lançamento
+            worksheet.set_column('E:H', 25) # Colunas extras
 
-            # 3. Cabeçalho da Tabela com Notas
+            # 3. Cabeçalho com Notas
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
                 col_idx = col_num + 1
                 worksheet.write(3, col_idx, titulo, fmt_cabecalho)
                 
                 if titulo == "Débito" or titulo == "Crédito":
-                    worksheet.write_comment(3, col_idx, "Escritório, coloque aqui o código reduzido do plano de contas que você utiliza no seu sistema.")
+                    worksheet.write_comment(3, col_idx, 'Escritório, coloque aqui o código reduzido do plano de contas que você utiliza no seu sistema.')
                 elif titulo == "Complemento":
-                    worksheet.write_comment(3, col_idx, "Coloque aqui o início do seu histórico ou um histórico padrão.")
+                    worksheet.write_comment(3, col_idx, 'Coloque aqui o início do seu histórico ou um histórico padrão.')
                 elif titulo == "Descrição":
-                    worksheet.write_comment(3, col_idx, "Coloque aqui a seguinte fórmula: =CONCAT(selecione_complemento; selecione_historico)")
+                    worksheet.write_comment(3, col_idx, 'Coloque aqui a seguinte fórmula: =CONCAT(selecione_complemento; selecione_historico)')
 
             # 4. Dados e Fórmulas
             for i, row in df.iterrows():
                 row_idx = i + 4
-                worksheet.write(row_idx, 1, row['Data'], fmt_grade)
-                worksheet.write(row_idx, 2, row['Histórico'], fmt_grade) # Já em Maiúsculo
+                # Escreve a Data centralizada (Coluna B / Índice 1)
+                worksheet.write(row_idx, 1, row['Data'], fmt_data)
                 
+                # Histórico (Coluna C)
+                worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
+                
+                # Valores (Coluna D)
                 v = row['Valor']
                 fmt_v = fmt_vermelho if v < 0 else fmt_verde
                 worksheet.write_number(row_idx, 3, v, fmt_v)
                 
-                worksheet.write(row_idx, 4, "", fmt_grade) # Débito
-                worksheet.write(row_idx, 5, "", fmt_grade) # Crédito
-                worksheet.write(row_idx, 6, "", fmt_grade) # Complemento
+                # Outras colunas
+                worksheet.write(row_idx, 4, "", fmt_grade)
+                worksheet.write(row_idx, 5, "", fmt_grade)
+                worksheet.write(row_idx, 6, "", fmt_grade)
                 
-                # Fórmula CONCAT automática unindo Complemento (G) + Histórico (C)
+                # Fórmula CONCAT
                 formula = f'=CONCAT(G{row_idx+1}; " "; C{row_idx+1})'
                 worksheet.write_formula(row_idx, 7, formula, fmt_grade)
 
         st.download_button(
-            label="📥 Baixar Planilha Finalizada",
+            label="📥 Baixar Planilha Final (Datas Centralizadas)",
             data=output.getvalue(),
             file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
