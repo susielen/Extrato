@@ -95,29 +95,34 @@ if arquivo_pdf:
             worksheet.set_column('D:D', 15) 
             worksheet.set_column('E:H', 25) 
 
+            # Configurações de tamanho das notas
+            prop_notas = {'width': 250, 'height': 70}
+
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
                 col_idx = col_num + 1
                 worksheet.write(3, col_idx, titulo, fmt_cabecalho)
                 
                 if titulo == "Débito" or titulo == "Crédito":
-                    worksheet.write_comment(3, col_idx, 'Escritório, coloque aqui o código reduzido do plano de contas.')
+                    worksheet.write_comment(3, col_idx, 
+                        'Escritório, coloque aqui o código reduzido do plano de contas que você utiliza no seu sistema.', 
+                        prop_notas)
                 elif titulo == "Complemento":
-                    # Nota avisando sobre o maiúsculo
-                    worksheet.write_comment(3, col_idx, 'DICA: Digite sempre em MAIÚSCULAS para manter o padrão.')
+                    worksheet.write_comment(3, col_idx, 
+                        'DICA: Digite sempre em MAIÚSCULAS para manter o padrão.', 
+                        prop_notas)
                 elif titulo == "Descrição":
-                    # Nova fórmula que converte tudo para maiúsculo automaticamente
-                    worksheet.write_comment(3, col_idx, 'Use esta fórmula para unir e deixar tudo grande: =MAIÚSCULA(CONCAT(G4; " "; C4))')
+                    worksheet.write_comment(3, col_idx, 
+                        'Use esta fórmula para unir e deixar tudo grande: =MAIÚSCULA(CONCAT(G4; " "; C4))', 
+                        prop_notas)
 
             for i, row in df.iterrows():
                 row_idx = i + 4
                 worksheet.write(row_idx, 1, row['Data'], fmt_data)
                 worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
-                
                 v = row['Valor']
                 fmt_v = fmt_vermelho if v < 0 else fmt_verde
                 worksheet.write_number(row_idx, 3, v, fmt_v)
-                
                 for col_extra in range(4, 8):
                     worksheet.write(row_idx, col_extra, "", fmt_grade)
 
