@@ -6,18 +6,18 @@ import io
 
 def limpar_valor_caixa(texto):
     if not texto: return None
-    t = str(texto).upper().strip()
-    # Identifica saída (D) ou entrada (C)
-    # No seu arquivo: "1.183,78 D" -> Negativo | "1.183,78 C" -> Positivo
+    # Remove aspas, espaços e limpa o texto
+    t = str(texto).replace('"', '').upper().strip()
+    if not t or t == "0,00 C" or t == "0,00 D": return 0.0
+    
+    # Regra: D para negativo, C para positivo
     e_saida = 'D' in t or '-' in t
     
-    # Remove letras e deixa apenas os números e separadores
+    # Pega apenas os números e separadores
     num = re.sub(r'[^\d,.]', '', t)
     try:
-        if ',' in num and '.' in num:
-            num = num.replace('.', '').replace(',', '.')
-        elif ',' in num:
-            num = num.replace(',', '.')
+        if ',' in num and '.' in num: num = num.replace('.', '').replace(',', '.')
+        elif ',' in num: num = num.replace(',', '.')
         res = float(num)
         return -res if e_saida else res
     except:
@@ -33,49 +33,53 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🤖 Conversor de Extrato Caixa & Santander")
+st.title("🤖 Conversor Universal (Caixa Especial)")
 
 nome_banco = st.text_input("Nome do Banco", "Caixa Econômica")
-arquivo_pdf = st.file_uploader("Selecione o arquivo PDF", type=["pdf"])
+arquivo_pdf = st.file_uploader("Selecione o PDF da Caixa", type=["pdf"])
 
 if arquivo_pdf:
     dados_lista = []
-    # Regex para pegar a data (DD/MM/AAAA) mesmo que tenha hora depois
+    # Regex para pegar a data dentro ou fora de aspas
     regex_data = r'(\d{2}/\d{2}/\d{4})'
 
     with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
-            # Extração focada em tabelas para o layout da Caixa
-            tabela = pagina.extract_table()
-            if tabela:
-                for linha in tabela:
-                    # Filtra apenas linhas que começam com data
-                    primeira_celula = str(linha[0])
-                    match_data = re.search(regex_data, primeir_celula)
+            texto_bruto = pagina.extract_text()
+            if not texto_bruto: continue
+            
+            linhas = texto_bruto.split('\n')
+            for linha in linhas:
+                # 1. Procura a data
+                match_data = re.search(regex_data, linha)
+                if match_data:
+                    data_f = match_data.group(1)
                     
-                    if match_data:
-                        data_f = match_data.group(1)
-                        # No modelo Caixa: o Valor é a penúltima coluna e o Saldo a última
-                        # Vamos pegar o Valor (geralmente índice -2 ou -1 dependendo da linha)
+                    # 2. Limpa a linha (remove aspas e divide por vírgulas ou aspas)
+                    # O formato do seu PDF é: "Data","Doc","Historico",,,"Valor","Saldo"
+                    partes = [p.strip().replace('"', '') for p in linha.split('","')]
+                    
+                    if len(partes) >= 3:
+                        # No seu arquivo, o histórico costuma ser a 3ª parte
+                        historico = partes[2].strip().upper()
+                        
+                        # O valor costuma ser a penúltima ou antepenúltima parte
+                        # Vamos procurar o campo que contém 'C' ou 'D'
                         valor_bruto = ""
-                        for celula in reversed(linha):
-                            if celula and ('C' in str(celula) or 'D' in str(celula)):
-                                valor_bruto = celula
+                        for p in partes:
+                            if ' C' in p or ' D' in p:
+                                valor_bruto = p
                                 break
                         
-                        # Histórico (Geralmente na coluna 2 ou 3)
-                        historico = str(linha[2]) if len(linha) > 2 else ""
-                        if not historico or historico == 'None':
-                            historico = str(linha[1])
-                            
-                        # Limpezas
-                        historico = historico.strip().upper()
-                        if historico.endswith("-"): historico = historico[:-1].strip()
-                        
+                        # Se não achou nas partes separadas, tenta na linha toda
+                        if not valor_bruto:
+                            match_v = re.findall(r'(\d+[\d.,]*\s?[DC])', linha)
+                            if match_v: valor_bruto = match_v[0]
+
                         v_final = limpar_valor_caixa(valor_bruto)
                         
-                        # Evita pegar "Saldo Dia" com valor 0
-                        if v_final is not None and v_final != 0:
+                        # Filtra "SALDO DIA" e valores zerados para não sujar a planilha
+                        if v_final is not None and v_final != 0 and "SALDO" not in historico:
                             dados_lista.append({
                                 'Data': data_f,
                                 'Histórico': historico,
@@ -102,12 +106,12 @@ if arquivo_pdf:
             # DESIGN
             worksheet.hide_gridlines(2)
             worksheet.merge_range('B2:C2', f"BANCO: {nome_banco}", fmt_cabecalho)
-            worksheet.set_column('B:B', 12) # Data Centralizada
-            worksheet.set_column('C:C', 45) # Histórico Maiúsculo
-            worksheet.set_column('D:D', 15) # Valor Colorido
-            worksheet.set_column('E:H', 25) # Colunas com Notas
+            worksheet.set_column('B:B', 12)
+            worksheet.set_column('C:C', 45)
+            worksheet.set_column('D:D', 15)
+            worksheet.set_column('E:H', 25)
 
-            # NOTAS GRANDES
+            # NOTAS
             prop = {'width': 280, 'height': 80}
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
@@ -118,11 +122,11 @@ if arquivo_pdf:
                 elif titulo == "Complemento":
                     worksheet.write_comment(3, col_idx, 'DICA: Digite sempre em MAIÚSCULAS.', prop)
                 elif titulo == "Descrição":
-                    worksheet.write_comment(3, col_idx, 'Use a fórmula: =MAIÚSCULA(CONCAT(G4; " "; C4))', prop)
+                    worksheet.write_comment(3, col_idx, 'Fórmula: =MAIÚSCULA(CONCAT(G4; " "; C4))', prop)
 
             for i, row in df.iterrows():
                 r = i + 4
-                worksheet.write(r, 1, row['Data'], fmt_data) # Data Centralizada
+                worksheet.write(r, 1, row['Data'], fmt_data)
                 worksheet.write(r, 2, row['Histórico'], fmt_grade)
                 v = row['Valor']
                 worksheet.write_number(r, 3, v, fmt_vermelho if v < 0 else fmt_verde)
@@ -130,4 +134,4 @@ if arquivo_pdf:
 
         st.download_button("📥 Baixar Planilha Final", output.getvalue(), f"Extrato_{nome_banco}.xlsx")
     else:
-        st.error("Dados não encontrados. Verifique se o PDF é o extrato original da Caixa.")
+        st.error("Ainda não conseguimos extrair os dados. Verifique se o PDF não está protegido por senha.")
