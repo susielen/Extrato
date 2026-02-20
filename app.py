@@ -4,87 +4,110 @@ import pandas as pd
 import re
 import io
 
-def formatar_valor_universal(texto):
-    """Limpa o texto e identifica se é débito pelo sinal ou pela letra D."""
-    if not texto: return 0.0, "C"
-    # Remove espaços e converte para maiúsculas
-    t = str(texto).upper().replace(" ", "")
+def processar_valor_com_sinal(texto_valor):
+    """
+    Analisa se o valor é negativo (-) ou positivo/crédito (C ou sem sinal)
+    e retorna o valor limpo e a coluna correta.
+    """
+    if not texto_valor: return None, None
     
-    # Identifica se é saída (presença de '-' ou 'D')
-    tipo = "D" if ("-" in t or "D" in t) else "C"
+    # Limpeza inicial: remove R$, espaços e pontos de milhar
+    t = str(texto_valor).upper().replace("R$", "").replace(" ", "")
     
-    # Pega apenas os números, pontos e vírgulas
-    numeros = re.sub(r'[^\d,.-]', '', t)
+    # IDENTIFICAÇÃO DO SINAL/TIPO
+    # É débito se: tiver o sinal '-' OU tiver a letra 'D'
+    e_debito = '-' in t or 'D' in t
+    
+    # Limpa o texto para deixar apenas o número e a vírgula decimal
+    apenas_numeros = re.sub(r'[^\d,]', '', t)
     
     try:
-        # Se o banco usa ponto para milhar (1.000,00), removemos o ponto e trocamos a vírgula
-        if "," in numeros:
-            valor = float(numeros.replace(".", "").replace(",", "."))
+        # Converte para float (ex: "1.250,50" -> 1250.50)
+        valor_float = float(apenas_numeros.replace(',', '.'))
+        
+        if e_debito:
+            return valor_float, "DEBITO"
         else:
-            valor = float(numeros)
-        return abs(valor), tipo
+            return valor_float, "CREDITO"
     except:
-        return 0.0, "C"
+        return None, None
 
-st.title("🤖 Robô de Extratos (Versão Texto)")
+# --- Interface Streamlit ---
+st.set_page_config(page_title="Robô de Extratos Pro", layout="wide")
+st.title("🤖 Robô de Extratos Bancários")
 
-empresa = st.sidebar.text_input("Empresa", "Minha Empresa")
-banco = st.sidebar.text_input("Banco", "Meu Banco")
+st.sidebar.header("📋 Dados do Relatório")
+nome_empresa = st.sidebar.text_input("Nome da Empresa", "Minha Empresa")
+nome_banco = st.sidebar.text_input("Nome do Banco", "Meu Banco")
 
-arquivo = st.file_uploader("Suba o PDF aqui", type="pdf")
+arquivo_pdf = st.file_uploader("Carregue o PDF do Extrato", type=["pdf"])
 
-if arquivo:
-    dados_brutos = []
+if arquivo_pdf:
+    dados_extraidos = []
     
-    with pdfplumber.open(arquivo) as pdf:
+    with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
-            # EXTRAÇÃO POR TEXTO (mais garantido que tabela)
-            texto_pag = pagina.extract_text()
-            if not texto_pag: continue
+            texto_completo = pagina.extract_text()
+            if not texto_completo: continue
             
-            linhas = texto_pag.split('\n')
+            linhas = texto_completo.split('\n')
             for linha in linhas:
-                # Procura por um padrão de data (ex: 01/01/2026 ou 01/01)
-                match_data = re.search(r'(\d{2}/\d{2}/\d{4}|\d{2}/\d{2})', linha)
+                # Procura o padrão de data (DD/MM ou DD/MM/AAAA) no início da linha
+                match_data = re.search(r'^(\d{2}/\d{2}(?:/\d{4})?)', linha.strip())
                 
                 if match_data:
-                    data = match_data.group(1)
-                    # O resto da linha vira o histórico e valor
-                    resto = linha.replace(data, "").strip()
+                    data_str = match_data.group(1)
                     
-                    # Tenta pegar o último "bloco" da linha como sendo o valor
-                    partes = resto.split()
+                    # Remove a data da linha para isolar histórico e valor
+                    resto_da_linha = linha.replace(data_str, "").strip()
+                    
+                    # Divide a linha em palavras para pegar o valor no final
+                    partes = resto_da_linha.split()
+                    
                     if len(partes) >= 2:
-                        valor_texto = partes[-1] # Geralmente o valor está no fim
-                        historico = " ".join(partes[:-1])
+                        valor_bruto = partes[-1]  # O valor com sinal está no fim
+                        historico = " ".join(partes[:-1]) # O meio é o histórico
                         
-                        v_num, v_tipo = formatar_valor_universal(valor_texto)
+                        valor_final, tipo = processar_valor_com_sinal(valor_bruto)
                         
-                        if v_num > 0: # Só adiciona se houver valor
-                            dados_brutos.append({
-                                'Data_Sort': pd.to_datetime(data, dayfirst=True, errors='coerce'),
-                                'Data': data,
+                        if valor_final is not None:
+                            dados_extraidos.append({
+                                'Data_Obj': pd.to_datetime(data_str, dayfirst=True, errors='coerce'),
+                                'Data': data_str,
                                 'Histórico': historico,
-                                'Débito': v_num if v_tipo == "D" else None,
-                                'Crédito': v_num if v_tipo == "C" else None
+                                'Débito': valor_final if tipo == "DEBITO" else None,
+                                'Crédito': valor_final if tipo == "CREDITO" else None
                             })
 
-    if dados_brutos:
-        df = pd.DataFrame(dados_brutos)
-        # Ordenar e Limpar
-        df = df.sort_values('Data_Sort').drop(columns=['Data_Sort'])
+    if dados_extraidos:
+        df = pd.DataFrame(dados_extraidos)
+        # Ordena por data (mais antigo para o mais novo)
+        df = df.sort_values('Data_Obj').drop(columns=['Data_Obj'])
         
-        st.write("### ✅ Extrato Processado")
+        st.write(f"### ✅ Visualização: {nome_empresa} - {nome_banco}")
         st.dataframe(df, use_container_width=True)
 
-        # Gerar Excel
+        # Geração do Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Cabeçalho
-            pd.DataFrame([[f"EMPRESA: {empresa}"], [f"BANCO: {banco}"]]).to_excel(writer, index=False, header=False)
-            # Dados (começando na linha 3)
+            # Título e Empresa no topo
+            pd.DataFrame([[f"EMPRESA: {nome_empresa}"], [f"BANCO: {nome_banco}"], [""]]).to_excel(writer, index=False, header=False, startrow=0)
+            
+            # Dados a partir da linha 4
             df.to_excel(writer, index=False, startrow=3, sheet_name='Extrato')
             
-        st.download_button("📥 Baixar Excel", output.getvalue(), f"Extrato_{banco}.xlsx")
+            # Formatação de Dinheiro
+            workbook = writer.book
+            worksheet = writer.sheets['Extrato']
+            format_dinheiro = workbook.add_format({'num_format': '#,##0.00'})
+            worksheet.set_column('C:D', 18, format_dinheiro)
+            worksheet.set_column('B:B', 40) # Coluna de Histórico mais larga
+
+        st.download_button(
+            label="📥 Baixar Planilha Excel",
+            data=output.getvalue(),
+            file_name=f"Extrato_{nome_empresa}_{nome_banco}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     else:
-        st.error("❌ Não encontrei dados no formato esperado. O PDF pode ser uma imagem (digitalizado).")
+        st.error("Não foram encontrados dados. Verifique se o PDF contém texto e se o valor está no fim da linha.")
