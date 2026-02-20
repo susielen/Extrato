@@ -4,31 +4,23 @@ import pandas as pd
 import re
 import io
 
-def limpar_geral(texto):
-    if not texto: return ""
-    # Remove aspas, quebras de linha (\n, \r) e espaços extras
-    return str(texto).replace('"', '').replace('\n', '').replace('\r', '').strip()
-
-def converter_valor_caixa(valor_texto):
-    t = limpar_geral(valor_texto).upper()
-    if not t or t == "0,00 C" or t == "0,00 D": return 0.0
+def limpar_valor_geral(texto):
+    if not texto: return None
+    t = str(texto).upper().replace('"', '').replace('\n', '').strip()
+    # Para o fornecedor o credito é positivo e o debito negativo
+    e_saida = 'D' in t or '-' in t
     
-    # Regra do fornecedor: D é saída (-), C é entrada (+)
-    saida = 'D' in t or '-' in t
-    
-    # Mantém só números e separadores
     num = re.sub(r'[^\d,.]', '', t)
     try:
         if ',' in num and '.' in num: num = num.replace('.', '').replace(',', '.')
         elif ',' in num: num = num.replace(',', '.')
         res = float(num)
-        return -res if saida else res
+        return -res if e_saida else res
     except:
         return None
 
-# --- INTERFACE ---
-st.set_page_config(page_title="Robô de Extratos Profissional", layout="centered")
-
+# --- CSS PARA AZUL TOTAL ---
+st.set_page_config(page_title="Robô de Extratos Multi-Banco", layout="centered")
 st.markdown("""
     <style>
     .stApp { background-color: #E3F2FD !important; }
@@ -36,54 +28,57 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🤖 Conversor de Extrato (Versão Corrigida)")
+st.title("🤖 Robô de Extratos (Santander & Caixa)")
 
-nome_banco = st.text_input("Nome do Banco", "Caixa Econômica")
+nome_banco = st.text_input("Nome do Banco", "Santander / Caixa")
 arquivo_pdf = st.file_uploader("Selecione o PDF", type=["pdf"])
 
 if arquivo_pdf:
     dados_lista = []
-    # Regex para pegar a data no formato DD/MM/AAAA
-    regex_data = r'(\d{2}/\d{2}/\d{4})'
+    regex_data = r'(\d{2}/\d{2}/\d{4}|\d{2}/\d{2}/\d{2}|\d{2}/\d{2})'
 
     with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
             texto_bruto = pagina.extract_text()
             if not texto_bruto: continue
             
-            # Divide o texto por aspas seguidas de vírgula para isolar os campos
             linhas = texto_bruto.split('\n')
             for linha in linhas:
-                # Verifica se a linha tem uma data
                 match_data = re.search(regex_data, linha)
                 if match_data:
                     data_f = match_data.group(1)
                     
-                    # Divide a linha pelas aspas e vírgulas: ","
-                    partes = linha.split('","')
+                    # --- CAMINHO 1: SE FOR O FORMATO DA CAIXA (COM VÍRGULAS E ASPAS) ---
+                    if '","' in linha or '",' in linha:
+                        partes = [p.replace('"', '').strip() for p in linha.split(',')]
+                        if len(partes) >= 3:
+                            historico = partes[2].upper()
+                            valor_bruto = ""
+                            for p in reversed(partes):
+                                if ' C' in p.upper() or ' D' in p.upper():
+                                    valor_bruto = p
+                                    break
+                            v_final = limpar_valor_geral(valor_bruto)
+                        else: v_final = None
                     
-                    if len(partes) >= 5:
-                        # Histórico costuma ser a 3ª parte (índice 2)
-                        historico = limpar_geral(partes[2]).upper()
-                        
-                        # O Valor no seu arquivo da Caixa está na penúltima posição
-                        # Vamos varrer as partes de trás para frente procurando o 'C' ou 'D'
-                        valor_bruto = ""
-                        for p in reversed(partes):
-                            limpo = limpar_geral(p)
-                            if ' C' in limpo or ' D' in limpo:
-                                valor_bruto = limpo
-                                break
-                        
-                        v_final = converter_valor_caixa(valor_bruto)
-                        
-                        # Filtra SALDO DIA e valores zerados
-                        if v_final is not None and v_final != 0 and "SALDO" not in historico:
-                            dados_lista.append({
-                                'Data': data_f,
-                                'Histórico': historico,
-                                'Valor': v_final
-                            })
+                    # --- CAMINHO 2: SE FOR O FORMATO DO SANTANDER (TEXTO CORRIDO) ---
+                    else:
+                        resto = linha.replace(data_f, "").strip()
+                        partes = resto.split()
+                        if len(partes) >= 2:
+                            valor_bruto = partes[-1]
+                            historico = " ".join(partes[:-1]).strip().upper()
+                            if historico.endswith("-"): historico = historico[:-1].strip()
+                            v_final = limpar_valor_geral(valor_bruto)
+                        else: v_final = None
+
+                    # Adiciona se for um lançamento válido
+                    if v_final is not None and v_final != 0 and "SALDO" not in str(historico):
+                        dados_lista.append({
+                            'Data': data_f,
+                            'Histórico': historico,
+                            'Valor': v_final
+                        })
 
     if dados_lista:
         df = pd.DataFrame(dados_lista)
@@ -95,14 +90,12 @@ if arquivo_pdf:
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
             workbook, worksheet = writer.book, writer.sheets['Extrato']
             
-            # FORMATOS
             fmt_grade = workbook.add_format({'border': 1})
             fmt_data = workbook.add_format({'border': 1, 'align': 'center'})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
             fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#EAEAEA', 'border': 1, 'align': 'center'})
 
-            # DESIGN
             worksheet.hide_gridlines(2)
             worksheet.merge_range('B2:C2', f"BANCO: {nome_banco}", fmt_cabecalho)
             worksheet.set_column('B:B', 12)
@@ -110,7 +103,6 @@ if arquivo_pdf:
             worksheet.set_column('D:D', 15)
             worksheet.set_column('E:H', 25)
 
-            # NOTAS
             prop = {'width': 280, 'height': 80}
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
@@ -119,7 +111,7 @@ if arquivo_pdf:
                 if titulo in ["Débito", "Crédito"]:
                     worksheet.write_comment(3, col_idx, 'Código reduzido do plano de contas.', prop)
                 elif titulo == "Complemento":
-                    worksheet.write_comment(3, col_idx, 'DICA: Use MAIÚSCULAS.', prop)
+                    worksheet.write_comment(3, col_idx, 'DICA: Digite sempre em MAIÚSCULAS.', prop)
                 elif titulo == "Descrição":
                     worksheet.write_comment(3, col_idx, 'Fórmula: =MAIÚSCULA(CONCAT(G4; " "; C4))', prop)
 
@@ -131,6 +123,6 @@ if arquivo_pdf:
                 worksheet.write_number(r, 3, v, fmt_vermelho if v < 0 else fmt_verde)
                 for c in range(4, 8): worksheet.write(r, c, "", fmt_grade)
 
-        st.download_button("📥 Baixar Planilha Final", output.getvalue(), f"Extrato_{nome_banco}.xlsx")
+        st.download_button("📥 Baixar Planilha Final", output.getvalue(), "Extrato_Final.xlsx")
     else:
-        st.error("O robô ainda não conseguiu ler. Isso acontece porque o PDF está codificado de uma forma muito difícil.")
+        st.error("Não foi possível ler este arquivo. Verifique se ele é um PDF original.")
