@@ -79,4 +79,32 @@ if arquivo_pdf:
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, startrow=3, startcol=1,
+            df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
+            workbook, worksheet = writer.book, writer.sheets['Extrato']
+            
+            # FORMATOS
+            fmt_grade = workbook.add_format({'border': 1})
+            fmt_data = workbook.add_format({'border': 1, 'align': 'center'})
+            fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
+            fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
+            fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#D9EAD3', 'border': 1, 'align': 'center'})
+
+            worksheet.set_column('B:B', 12)
+            worksheet.set_column('C:C', 50)
+            worksheet.set_column('D:H', 20)
+
+            titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
+            for i, tit in enumerate(titulos):
+                worksheet.write(3, i+1, tit, fmt_cabecalho)
+
+            for i, row in df.iterrows():
+                r = i + 4
+                worksheet.write(r, 1, row['Data'], fmt_data)
+                worksheet.write(r, 2, row['Histórico'], fmt_grade)
+                v = row['Valor']
+                worksheet.write_number(r, 3, v, fmt_vermelho if v < 0 else fmt_verde)
+                for c in range(4, 8): worksheet.write(r, c, "", fmt_grade)
+
+        st.download_button("📥 Baixar Planilha Completa", output.getvalue(), "Extrato_Tudo.xlsx")
+    else:
+        st.error("Não foram encontrados valores. O PDF pode estar num formato de imagem.")
