@@ -7,7 +7,7 @@ import io
 def processar_valor_unico(texto_valor):
     if not texto_valor: return None
     t = str(texto_valor).upper().replace(" ", "").replace("R$", "")
-    # Para o fornecedor o credito é positivo e o debito negativo
+    # Regra: Débito (-) e Crédito (+)
     e_saida = '-' in t or 'D' in t
     apenas_numeros = re.sub(r'[^\d,]', '', t)
     try:
@@ -80,12 +80,9 @@ if arquivo_pdf:
             
             # --- FORMATOS ---
             fmt_grade = workbook.add_format({'border': 1})
-            # Formato específico para centralizar a Data
             fmt_data = workbook.add_format({'border': 1, 'align': 'center'})
-            
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
-            
             fmt_cabecalho = workbook.add_format({
                 'bold': True, 'bg_color': '#EAEAEA', 'border': 1,
                 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter'
@@ -98,10 +95,10 @@ if arquivo_pdf:
             worksheet.merge_range('B2:C2', f"BANCO: {nome_banco}", fmt_cabecalho)
 
             # 2. Ajuste de Colunas
-            worksheet.set_column('B:B', 12) # Data
-            worksheet.set_column('C:C', 45) # Histórico
-            worksheet.set_column('D:D', 15) # Valor
-            worksheet.set_column('E:H', 25) # Colunas extras
+            worksheet.set_column('B:B', 12) 
+            worksheet.set_column('C:C', 45) 
+            worksheet.set_column('D:D', 15) 
+            worksheet.set_column('E:H', 25) 
 
             # 3. Cabeçalho com Notas
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
@@ -112,35 +109,26 @@ if arquivo_pdf:
                 if titulo == "Débito" or titulo == "Crédito":
                     worksheet.write_comment(3, col_idx, 'Escritório, coloque aqui o código reduzido do plano de contas que você utiliza no seu sistema.')
                 elif titulo == "Complemento":
-                    worksheet.write_comment(3, col_idx, 'Coloque aqui o início do seu histórico ou um histórico padrão.')
+                    worksheet.write_comment(3, col_idx, 'Coloque aqui o início do seu histórico ou um histórico padrão. Por exemplo: PAGAMENTO DE OU RECEBIMENTO DE')
                 elif titulo == "Descrição":
-                    worksheet.write_comment(3, col_idx, 'Coloque aqui a seguinte fórmula: =CONCAT(selecione_complemento; selecione_historico)')
+                    worksheet.write_comment(3, col_idx, 'Coloque aqui a seguinte fórmula: =CONCAT(selecione_complemento; selecione_historico) e depois arraste para as celulas abaixo')
 
-            # 4. Dados e Fórmulas
+            # 4. Dados (Descrição Vazia com Grade)
             for i, row in df.iterrows():
                 row_idx = i + 4
-                # Escreve a Data centralizada (Coluna B / Índice 1)
                 worksheet.write(row_idx, 1, row['Data'], fmt_data)
-                
-                # Histórico (Coluna C)
                 worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
                 
-                # Valores (Coluna D)
                 v = row['Valor']
                 fmt_v = fmt_vermelho if v < 0 else fmt_verde
                 worksheet.write_number(row_idx, 3, v, fmt_v)
                 
-                # Outras colunas
-                worksheet.write(row_idx, 4, "", fmt_grade)
-                worksheet.write(row_idx, 5, "", fmt_grade)
-                worksheet.write(row_idx, 6, "", fmt_grade)
-                
-                # Fórmula CONCAT
-                formula = f'=CONCAT(G{row_idx+1}; " "; C{row_idx+1})'
-                worksheet.write_formula(row_idx, 7, formula, fmt_grade)
+                # Colunas de E até H (Débito, Crédito, Complemento, Descrição) vazias com grade
+                for col_extra in range(4, 8):
+                    worksheet.write(row_idx, col_extra, "", fmt_grade)
 
         st.download_button(
-            label="📥 Baixar Planilha Final (Datas Centralizadas)",
+            label="📥 Baixar Planilha Final",
             data=output.getvalue(),
             file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
