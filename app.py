@@ -7,6 +7,7 @@ import io
 def processar_valor_unico(texto_valor):
     if not texto_valor: return None
     t = str(texto_valor).upper().replace(" ", "").replace("R$", "")
+    # Para o fornecedor o credito é positivo e o debito negativo
     e_saida = '-' in t or 'D' in t
     apenas_numeros = re.sub(r'[^\d,]', '', t)
     try:
@@ -15,25 +16,24 @@ def processar_valor_unico(texto_valor):
     except:
         return None
 
-# --- CSS PARA DEIXAR TUDO AZUL (INCLUINDO CABEÇALHO) ---
+# --- CSS PARA DEIXAR TUDO AZUL ---
 st.set_page_config(page_title="Robô de Extratos", layout="centered")
 
 st.markdown("""
     <style>
-    /* Fundo principal da aplicação */
+    /* Pintar o fundo de toda a página */
     .stApp {
         background-color: #E3F2FD !important;
     }
-    /* Cor do cabeçalho (Header) do Streamlit */
+    /* Pintar a barra branca do topo */
     header[data-testid="stHeader"] {
         background-color: #E3F2FD !important;
     }
-    /* Estilização dos campos de entrada para não quebrarem o visual */
+    /* Estilizar o campo de Banco */
     .stTextInput>div>div>input {
         background-color: #FFFFFF !important;
         border: 1px solid #1565C0;
     }
-    /* Título em azul escuro para contraste */
     h1 {
         color: #1565C0 !important;
     }
@@ -42,9 +42,8 @@ st.markdown("""
 
 st.title("🤖 Conversor de Extrato Bancário")
 
-col_emp, col_ban = st.columns(2)
-nome_empresa = col_emp.text_input("Empresa", "Minha Empresa")
-nome_banco = col_ban.text_input("Banco", "Banco")
+# Campo Empresa removido conforme solicitado
+nome_banco = st.text_input("Nome do Banco", "Banco")
 
 arquivo_pdf = st.file_uploader("Selecione o arquivo PDF", type=["pdf"])
 
@@ -76,42 +75,43 @@ if arquivo_pdf:
         st.dataframe(df)
 
         output = io.BytesIO()
-        # O segredo para remover a Sheet1 é criar o Writer e já definir a aba Extrato no primeiro comando
+        # O segredo para não ter Sheet1 é definir a aba no primeiro comando de escrita
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Forçamos a escrita na aba Extrato. O XlsxWriter não criará a Sheet1 se fizermos assim:
-            df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
+            # Iniciamos direto na aba 'Extrato'
+            df.to_excel(writer, index=False, startrow=2, startcol=1, sheet_name='Extrato')
             
             workbook = writer.book
             worksheet = writer.sheets['Extrato']
             
-            # Formatos
             fmt_negrito = workbook.add_format({'bold': True, 'border': 1})
             fmt_grade = workbook.add_format({'border': 1})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
             fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#EAEAEA', 'border': 1})
 
-            # Layout Excel
+            # Margem e Título
             worksheet.set_column('A:A', 2) 
-            worksheet.write('B1', f"EMPRESA: {nome_empresa}", fmt_negrito)
-            worksheet.write('B2', f"BANCO: {nome_banco}", fmt_negrito)
+            worksheet.write('B1', f"BANCO: {nome_banco}", fmt_negrito)
             worksheet.hide_gridlines(2)
 
-            worksheet.set_column('B:B', 12)
-            worksheet.set_column('C:C', 45)
-            worksheet.set_column('D:D', 15)
-            worksheet.set_column('E:H', 15)
+            # Ajuste de Colunas
+            worksheet.set_column('B:B', 12) # Data
+            worksheet.set_column('C:C', 45) # Histórico
+            worksheet.set_column('D:D', 15) # Valor
+            worksheet.set_column('E:H', 15) # Extras
 
+            # Cabeçalho da tabela
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
-                worksheet.write(3, col_num + 1, titulo, fmt_cabecalho)
+                worksheet.write(2, col_num + 1, titulo, fmt_cabecalho)
 
-            # Preenchimento de dados
+            # Dados com cores e grades
             for i, row in df.iterrows():
-                row_idx = i + 4
+                row_idx = i + 3
                 worksheet.write(row_idx, 1, row['Data'], fmt_grade)
                 worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
                 v = row['Valor']
+                # Para o fornecedor o credito é positivo e o debito negativo
                 worksheet.write_number(row_idx, 3, v, fmt_vermelho if v < 0 else fmt_verde)
                 for c in range(4, 8): worksheet.write(row_idx, c, "", fmt_grade)
 
@@ -120,4 +120,4 @@ if arquivo_pdf:
             data=output.getvalue(),
             file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )        
+        )
