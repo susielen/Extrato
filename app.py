@@ -4,77 +4,71 @@ import pandas as pd
 import re
 import io
 
-def formatar_valor_final(texto):
+def extrair_valor_limpo(texto):
     if not texto: return None
     t = str(texto).upper().replace('"', '').replace(' ', '').strip()
-    # Regra: para o fornecedor credito (+) e debito (-)
-    e_saida = 'D' in t or '-' in t
-    # Pega só números e separadores
+    # Regra Contábil: D é Saída (-), C é Entrada (+)
+    saida = 'D' in t or '-' in t
     num = re.sub(r'[^\d,.]', '', t)
     try:
         if ',' in num and '.' in num: num = num.replace('.', '').replace(',', '.')
         elif ',' in num: num = num.replace(',', '.')
         res = float(num)
-        return -res if e_saida else res
+        return -res if saida else res
     except:
         return None
 
-# --- ESTILO ---
-st.set_page_config(page_title="Robô de Extratos Multi-Banco", layout="centered")
+# --- INTERFACE ---
+st.set_page_config(page_title="Conversor de Extrato Profissional", layout="centered")
 st.markdown("<style>.stApp {background-color: #E3F2FD;}</style>", unsafe_allow_html=True)
 
-st.title("🤖 Super Robô de Extratos v13")
-st.write("Configurado para ler todas as linhas da Caixa e Santander.")
+st.title("🤖 Robô de Extratos v14")
+st.write("Otimizado para capturar múltiplos lançamentos por linha (Caixa/Santander).")
 
 arquivo_pdf = st.file_uploader("Selecione o PDF", type=["pdf"])
 
 if arquivo_pdf:
     dados_lista = []
-    # Expressão que "caça" a linha completa: Data até o Valor (C ou D)
-    # Explicação: Procura data, ignora o que tiver no meio, e para quando acha um valor com C ou D
-    padrao_caixa = re.compile(r'(\d{2}/\d{2}/\d{4}).*?([\d.,]+\s*[CD])')
+    # Regex para capturar datas e valores com C/D
+    regex_data = r'(\d{2}/\d{2}/\d{4})'
+    regex_valor_cd = r'([\d.]+,\d{2}\s*[CD])'
 
     with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
-            # Extrai o texto e remove as quebras de linha para o texto ficar "corrido"
-            texto_puro = pagina.extract_text()
-            if not texto_puro: continue
-            
-            # Limpeza radical: transforma a página num único texto sem aspas e sem quebras de linha
-            texto_limpo = texto_puro.replace('"', '').replace('\n', ' ').replace('\r', ' ')
-            
-            # Procura todas as ocorrências na página
-            encontrados = padrao_caixa.findall(texto_limpo)
-            
-            for item in encontrados:
-                data_f = item[0]
-                valor_bruto = item[1]
-                
-                # Para achar o histórico, pegamos o que está entre a data e o valor no texto limpo
-                # Usamos um truque simples de recorte de texto
-                pos_data = texto_limpo.find(data_f)
-                pos_valor = texto_limpo.find(valor_bruto, pos_data)
-                historico = texto_limpo[pos_data + len(data_f):pos_valor].strip()
-                
-                # Limpezas finais no histórico
-                historico = re.sub(r'\d{2}:\d{2}:\d{2}', '', historico) # Tira a hora
-                historico = historico.replace(',', ' ').strip().upper()
-                
-                v_final = formatar_valor_final(valor_bruto)
-                
-                # Só adiciona se o valor não for zero e não for o título "SALDO"
-                if v_final is not None and v_final != 0 and "SALDO" not in historico:
-                    dados_lista.append({
-                        'Data': data_f,
-                        'Histórico': historico,
-                        'Valor': v_final
-                    })
-                    # Removemos o trecho já processado para não repetir
-                    texto_limpo = texto_limpo[pos_valor + len(valor_bruto):]
+            # Extração em formato de tabela para lidar com as aspas do seu PDF
+            tabelas = pagina.extract_tables()
+            for tabela in tabelas:
+                for linha in tabela:
+                    # Une a linha para processar blocos de texto internos
+                    texto_linha = " ".join([str(c) for c in linha if c])
+                    
+                    # Encontra todas as datas e todos os valores na mesma "linha" do PDF
+                    datas_encontradas = re.findall(regex_data, texto_linha)
+                    valores_encontrados = re.findall(regex_valor_cd, texto_linha)
+                    
+                    # Se houver múltiplos valores para uma ou mais datas
+                    for i in range(len(valores_encontrados)):
+                        valor_bruto = valores_encontrados[i]
+                        # Associa à data correspondente ou à última data encontrada
+                        data_mov = datas_encontradas[i] if i < len(datas_encontradas) else datas_encontradas[-1]
+                        
+                        # Tenta isolar o histórico (texto que não é data nem valor)
+                        historico = texto_linha.replace(data_mov, "").replace(valor_bruto, "")
+                        historico = re.sub(r'["\n\r]', ' ', historico) # Limpa aspas e quebras
+                        historico = re.sub(r'\d{2}:\d{2}:\d{2}', '', historico).strip().upper()
+                        
+                        v_final = extrair_valor_limpo(valor_bruto)
+                        
+                        if v_final is not None and v_final != 0 and "SALDO" not in historico:
+                            dados_lista.append({
+                                'Data': data_mov,
+                                'Histórico': historico[:50], # Limita tamanho para o Excel
+                                'Valor': v_final
+                            })
 
     if dados_lista:
         df = pd.DataFrame(dados_lista)
-        st.success(f"Sucesso! Conseguimos extrair {len(df)} lançamentos.")
+        st.success(f"Capturados {len(df)} lançamentos com sucesso!")
         st.dataframe(df)
 
         output = io.BytesIO()
@@ -82,29 +76,18 @@ if arquivo_pdf:
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
             workbook, worksheet = writer.book, writer.sheets['Extrato']
             
-            # FORMATOS
-            fmt_grade = workbook.add_format({'border': 1})
-            fmt_data = workbook.add_format({'border': 1, 'align': 'center'})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
-            fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#D9EAD3', 'border': 1, 'align': 'center'})
+            fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#D9EAD3', 'border': 1})
 
-            worksheet.set_column('B:B', 12)
-            worksheet.set_column('C:C', 50)
-            worksheet.set_column('D:H', 20)
-
-            titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
-            for i, tit in enumerate(titulos):
-                worksheet.write(3, i+1, tit, fmt_cabecalho)
-
+            worksheet.set_column('B:D', 20)
+            worksheet.set_column('C:C', 40)
+            
             for i, row in df.iterrows():
                 r = i + 4
-                worksheet.write(r, 1, row['Data'], fmt_data)
-                worksheet.write(r, 2, row['Histórico'], fmt_grade)
                 v = row['Valor']
                 worksheet.write_number(r, 3, v, fmt_vermelho if v < 0 else fmt_verde)
-                for c in range(4, 8): worksheet.write(r, c, "", fmt_grade)
 
-        st.download_button("📥 Baixar Planilha Completa", output.getvalue(), "Extrato_Tudo.xlsx")
+        st.download_button("📥 Baixar Planilha Integrada", output.getvalue(), "Extrato_Completo.xlsx")
     else:
-        st.error("Não foram encontrados valores. O PDF pode estar num formato de imagem.")
+        st.error("Não foram detectados lançamentos. Verifique o formato do arquivo.")
