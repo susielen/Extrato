@@ -111,7 +111,7 @@ if arquivo_pdf:
                 elif titulo == "Complemento":
                     worksheet.write_comment(3, col_idx, 'Coloque aqui o início do seu histórico ou um histórico padrão. Por exemplo: PAGAMENTO DE OU RECEBIMENTO DE')
                 elif titulo == "Descrição":
-                    worksheet.write_comment(3, col_idx, 'Coloque aqui a seguinte fórmula: =CONCAT(selecione_complemento; selecione_historico) e depois arraste para as celulas abaixo')
+                    worksheet.write_comment(3, col_idx, 'Coloque aqui a fórmula: =CONCAT(selecione_complemento; selecione_historico) e depois arraste para as celulas abaixo')
 
             # 4. Dados (Descrição Vazia com Grade)
             for i, row in df.iterrows():
