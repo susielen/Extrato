@@ -93,3 +93,4 @@ if arquivo_pdf:
                 file_name=f"Extrato_{nome_empresa}_{nome_banco}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            
