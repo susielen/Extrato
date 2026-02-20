@@ -7,7 +7,7 @@ import io
 def processar_valor_unico(texto_valor):
     if not texto_valor: return None
     t = str(texto_valor).upper().replace(" ", "").replace("R$", "")
-    # Para o fornecedor o credito é positivo e o debito negativo
+    # Regra: Débito (-) e Crédito (+)
     e_saida = '-' in t or 'D' in t
     apenas_numeros = re.sub(r'[^\d,]', '', t)
     try:
@@ -16,34 +16,25 @@ def processar_valor_unico(texto_valor):
     except:
         return None
 
-# --- CSS PARA DEIXAR TUDO AZUL ---
+# --- CSS PARA AZUL TOTAL NO STREAMLIT ---
 st.set_page_config(page_title="Robô de Extratos", layout="centered")
 
 st.markdown("""
     <style>
-    /* Pintar o fundo de toda a página */
-    .stApp {
+    .stApp, header[data-testid="stHeader"], [data-testid="stToolbar"] {
         background-color: #E3F2FD !important;
     }
-    /* Pintar a barra branca do topo */
-    header[data-testid="stHeader"] {
-        background-color: #E3F2FD !important;
-    }
-    /* Estilizar o campo de Banco */
     .stTextInput>div>div>input {
         background-color: #FFFFFF !important;
         border: 1px solid #1565C0;
     }
-    h1 {
-        color: #1565C0 !important;
-    }
+    h1 { color: #1565C0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🤖 Conversor de Extrato Bancário")
 
-# Campo Empresa removido conforme solicitado
-nome_banco = st.text_input("Nome do Banco", "Banco")
+nome_banco = st.text_input("Nome do Banco", "Banco Santander")
 
 arquivo_pdf = st.file_uploader("Selecione o arquivo PDF", type=["pdf"])
 
@@ -75,45 +66,48 @@ if arquivo_pdf:
         st.dataframe(df)
 
         output = io.BytesIO()
-        # O segredo para não ter Sheet1 é definir a aba no primeiro comando de escrita
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Iniciamos direto na aba 'Extrato'
-            df.to_excel(writer, index=False, startrow=2, startcol=1, sheet_name='Extrato')
+            # Dados começam na linha 4 (índice 3) para dar espaço às margens e título
+            df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
             
             workbook = writer.book
             worksheet = writer.sheets['Extrato']
             
-            fmt_negrito = workbook.add_format({'bold': True, 'border': 1})
+            # --- FORMATOS ---
+            fmt_banco = workbook.add_format({'bold': True, 'font_size': 12})
             fmt_grade = workbook.add_format({'border': 1})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
             fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#EAEAEA', 'border': 1})
 
-            # Margem e Título
-            worksheet.set_column('A:A', 2) 
-            worksheet.write('B1', f"BANCO: {nome_banco}", fmt_negrito)
+            # 1. Margens (Respiro visual)
+            worksheet.set_row(0, 15)       # Linha 1 vazia (Margem superior)
+            worksheet.set_column('A:A', 2) # Coluna A vazia (Margem esquerda)
             worksheet.hide_gridlines(2)
 
-            # Ajuste de Colunas
+            # 2. Título do Banco (Linha 2, mesclado)
+            worksheet.merge_range('B2:D2', f"BANCO: {nome_banco}", fmt_banco)
+
+            # 3. Ajuste de Colunas
             worksheet.set_column('B:B', 12) # Data
             worksheet.set_column('C:C', 45) # Histórico
             worksheet.set_column('D:D', 15) # Valor
             worksheet.set_column('E:H', 15) # Extras
 
-            # Cabeçalho da tabela
+            # 4. Cabeçalho da Tabela (Linha 4)
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
-                worksheet.write(2, col_num + 1, titulo, fmt_cabecalho)
+                worksheet.write(3, col_num + 1, titulo, fmt_cabecalho)
 
-            # Dados com cores e grades
+            # 5. Dados com grade e cores
             for i, row in df.iterrows():
-                row_idx = i + 3
+                row_idx = i + 4
                 worksheet.write(row_idx, 1, row['Data'], fmt_grade)
                 worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
                 v = row['Valor']
-                # Para o fornecedor o credito é positivo e o debito negativo
                 worksheet.write_number(row_idx, 3, v, fmt_vermelho if v < 0 else fmt_verde)
-                for c in range(4, 8): worksheet.write(row_idx, c, "", fmt_grade)
+                for c in range(4, 8): 
+                    worksheet.write(row_idx, c, "", fmt_grade)
 
         st.download_button(
             label="📥 Baixar Planilha Final",
