@@ -109,7 +109,7 @@ if arquivo_pdf:
                         prop_notas)
                 elif titulo == "Complemento":
                     worksheet.write_comment(3, col_idx, 
-                        'DICA: Digite sempre em MAIÚSCULAS para manter o padrão.', 
+                        'Coloque aqui o início do seu histórico ou um histórico padrão. Por exemplo: PAGAMENTO DE OU RECEBIMENTO DE', 
                         prop_notas)
                 elif titulo == "Descrição":
                     worksheet.write_comment(3, col_idx, 
