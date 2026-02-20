@@ -113,7 +113,7 @@ if arquivo_pdf:
                         prop_notas)
                 elif titulo == "Descrição":
                     worksheet.write_comment(3, col_idx, 
-                        'Use esta fórmula para unir e deixar tudo grande: =MAIÚSCULA(CONCAT(G4; " "; C4))', 
+                        'Use esta fórmula para unir e deixar tudo grande: =MAIÚSCULA(CONCAT(G4; " "; C4)) e arraste para as outras celulas', 
                         prop_notas)
 
             for i, row in df.iterrows():
