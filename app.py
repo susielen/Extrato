@@ -4,22 +4,25 @@ import pandas as pd
 import re
 import io
 
-def limpar_valor_caixa(texto):
-    if not texto: return None
-    # Remove aspas, espaços e limpa o texto
-    t = str(texto).replace('"', '').upper().strip()
+def limpar_geral(texto):
+    if not texto: return ""
+    # Remove aspas, quebras de linha (\n, \r) e espaços extras
+    return str(texto).replace('"', '').replace('\n', '').replace('\r', '').strip()
+
+def converter_valor_caixa(valor_texto):
+    t = limpar_geral(valor_texto).upper()
     if not t or t == "0,00 C" or t == "0,00 D": return 0.0
     
-    # Regra: D para negativo, C para positivo
-    e_saida = 'D' in t or '-' in t
+    # Regra do fornecedor: D é saída (-), C é entrada (+)
+    saida = 'D' in t or '-' in t
     
-    # Pega apenas os números e separadores
+    # Mantém só números e separadores
     num = re.sub(r'[^\d,.]', '', t)
     try:
         if ',' in num and '.' in num: num = num.replace('.', '').replace(',', '.')
         elif ',' in num: num = num.replace(',', '.')
         res = float(num)
-        return -res if e_saida else res
+        return -res if saida else res
     except:
         return None
 
@@ -33,14 +36,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🤖 Conversor Universal (Caixa Especial)")
+st.title("🤖 Conversor de Extrato (Versão Corrigida)")
 
 nome_banco = st.text_input("Nome do Banco", "Caixa Econômica")
-arquivo_pdf = st.file_uploader("Selecione o PDF da Caixa", type=["pdf"])
+arquivo_pdf = st.file_uploader("Selecione o PDF", type=["pdf"])
 
 if arquivo_pdf:
     dados_lista = []
-    # Regex para pegar a data dentro ou fora de aspas
+    # Regex para pegar a data no formato DD/MM/AAAA
     regex_data = r'(\d{2}/\d{2}/\d{4})'
 
     with pdfplumber.open(arquivo_pdf) as pdf:
@@ -48,37 +51,33 @@ if arquivo_pdf:
             texto_bruto = pagina.extract_text()
             if not texto_bruto: continue
             
+            # Divide o texto por aspas seguidas de vírgula para isolar os campos
             linhas = texto_bruto.split('\n')
             for linha in linhas:
-                # 1. Procura a data
+                # Verifica se a linha tem uma data
                 match_data = re.search(regex_data, linha)
                 if match_data:
                     data_f = match_data.group(1)
                     
-                    # 2. Limpa a linha (remove aspas e divide por vírgulas ou aspas)
-                    # O formato do seu PDF é: "Data","Doc","Historico",,,"Valor","Saldo"
-                    partes = [p.strip().replace('"', '') for p in linha.split('","')]
+                    # Divide a linha pelas aspas e vírgulas: ","
+                    partes = linha.split('","')
                     
-                    if len(partes) >= 3:
-                        # No seu arquivo, o histórico costuma ser a 3ª parte
-                        historico = partes[2].strip().upper()
+                    if len(partes) >= 5:
+                        # Histórico costuma ser a 3ª parte (índice 2)
+                        historico = limpar_geral(partes[2]).upper()
                         
-                        # O valor costuma ser a penúltima ou antepenúltima parte
-                        # Vamos procurar o campo que contém 'C' ou 'D'
+                        # O Valor no seu arquivo da Caixa está na penúltima posição
+                        # Vamos varrer as partes de trás para frente procurando o 'C' ou 'D'
                         valor_bruto = ""
-                        for p in partes:
-                            if ' C' in p or ' D' in p:
-                                valor_bruto = p
+                        for p in reversed(partes):
+                            limpo = limpar_geral(p)
+                            if ' C' in limpo or ' D' in limpo:
+                                valor_bruto = limpo
                                 break
                         
-                        # Se não achou nas partes separadas, tenta na linha toda
-                        if not valor_bruto:
-                            match_v = re.findall(r'(\d+[\d.,]*\s?[DC])', linha)
-                            if match_v: valor_bruto = match_v[0]
-
-                        v_final = limpar_valor_caixa(valor_bruto)
+                        v_final = converter_valor_caixa(valor_bruto)
                         
-                        # Filtra "SALDO DIA" e valores zerados para não sujar a planilha
+                        # Filtra SALDO DIA e valores zerados
                         if v_final is not None and v_final != 0 and "SALDO" not in historico:
                             dados_lista.append({
                                 'Data': data_f,
@@ -118,9 +117,9 @@ if arquivo_pdf:
                 col_idx = col_num + 1
                 worksheet.write(3, col_idx, titulo, fmt_cabecalho)
                 if titulo in ["Débito", "Crédito"]:
-                    worksheet.write_comment(3, col_idx, 'Escritório, coloque aqui o código reduzido do plano de contas.', prop)
+                    worksheet.write_comment(3, col_idx, 'Código reduzido do plano de contas.', prop)
                 elif titulo == "Complemento":
-                    worksheet.write_comment(3, col_idx, 'DICA: Digite sempre em MAIÚSCULAS.', prop)
+                    worksheet.write_comment(3, col_idx, 'DICA: Use MAIÚSCULAS.', prop)
                 elif titulo == "Descrição":
                     worksheet.write_comment(3, col_idx, 'Fórmula: =MAIÚSCULA(CONCAT(G4; " "; C4))', prop)
 
@@ -134,4 +133,4 @@ if arquivo_pdf:
 
         st.download_button("📥 Baixar Planilha Final", output.getvalue(), f"Extrato_{nome_banco}.xlsx")
     else:
-        st.error("Ainda não conseguimos extrair os dados. Verifique se o PDF não está protegido por senha.")
+        st.error("O robô ainda não conseguiu ler. Isso acontece porque o PDF está codificado de uma forma muito difícil.")
