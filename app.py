@@ -15,6 +15,7 @@ def processar_valor_unico(texto_valor):
     except:
         return None
 
+# --- Interface Streamlit ---
 st.set_page_config(page_title="Robô de Extratos", layout="centered")
 st.title("🤖 Conversor de Extrato Bancário")
 
@@ -48,7 +49,7 @@ if arquivo_pdf:
                                 'Débito': "",
                                 'Crédito': "",
                                 'Complemento': "",
-                                'Descrição': historico # Texto fixo, sem formula
+                                'Descrição': ""
                             })
 
     if dados_lista:
@@ -59,39 +60,55 @@ if arquivo_pdf:
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Escreve os dados na aba 'Extrato'
             df.to_excel(writer, index=False, startrow=3, sheet_name='Extrato')
             
             workbook = writer.book
             worksheet = writer.sheets['Extrato']
             
-            # Formatos
-            fmt_negrito = workbook.add_format({'bold': True})
-            fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00'})
-            fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00'})
-            fmt_padrao = workbook.add_format({'num_format': '#,##0.00'})
+            # --- Definição de Formatos ---
+            fmt_negrito = workbook.add_format({'bold': True, 'border': 1})
+            fmt_grade = workbook.add_format({'border': 1})
+            fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
+            fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
+            fmt_cabecalho_tabela = workbook.add_format({'bold': True, 'bg_color': '#D3D3D3', 'border': 1})
 
-            # 1. Título em Negrito
+            # 1. Títulos superiores com borda
             worksheet.write('A1', f"EMPRESA: {nome_empresa}", fmt_negrito)
             worksheet.write('A2', f"BANCO: {nome_banco}", fmt_negrito)
 
-            # 2. Remover Linhas de Grade
-            worksheet.hide_gridlines(2) # 2 remove as grades da tela e da impressão
+            # 2. Esconde as grades gerais do fundo
+            worksheet.hide_gridlines(2)
 
-            # 3. Ajuste de Colunas
+            # 3. Formata o cabeçalho da tabela (Data, Histórico, etc)
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(3, col_num, value, fmt_cabecalho_tabela)
+
+            # 4. Ajuste de Colunas
             worksheet.set_column('B:B', 45) # Histórico
             worksheet.set_column('C:C', 15) # Valor
-            worksheet.set_column('D:G', 15) # Colunas extras (Débito, Crédito, Complemento, Descrição)
+            worksheet.set_column('D:G', 15) # Extras
 
-            # 4. Cores nos Números (Sem fundo colorido)
+            # 5. Aplica grade e cores apenas onde tem informação
             for i, row in df.iterrows():
                 row_idx = i + 4
+                
+                # Coluna Data (A) e Histórico (B) com grade
+                worksheet.write(row_idx, 0, row['Data'], fmt_grade)
+                worksheet.write(row_idx, 1, row['Histórico'], fmt_grade)
+                
+                # Coluna Valor (C) com cor e grade
                 valor = row['Valor']
-                formato = fmt_vermelho if valor < 0 else fmt_verde
-                worksheet.write_number(row_idx, 2, valor, formato)
+                formato_valor = fmt_vermelho if valor < 0 else fmt_verde
+                worksheet.write_number(row_idx, 2, valor, formato_valor)
+                
+                # Colunas extras (D, E, F, G) apenas com grade (mesmo vazias)
+                worksheet.write(row_idx, 3, "", fmt_grade)
+                worksheet.write(row_idx, 4, "", fmt_grade)
+                worksheet.write(row_idx, 5, "", fmt_grade)
+                worksheet.write(row_idx, 6, "", fmt_grade)
 
         st.download_button(
-            label="📥 Baixar Planilha Limpa",
+            label="📥 Baixar Planilha com Grade",
             data=output.getvalue(),
             file_name=f"Extrato_{nome_empresa}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
