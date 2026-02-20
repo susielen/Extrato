@@ -67,39 +67,44 @@ if arquivo_pdf:
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Dados começam na linha 4 (índice 3) para dar espaço às margens e título
+            # Dados na aba 'Extrato'
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
             
             workbook = writer.book
             worksheet = writer.sheets['Extrato']
             
             # --- FORMATOS ---
-            fmt_banco = workbook.add_format({'bold': True, 'font_size': 12})
+            # Nome do banco na mesma cor azul escuro do Streamlit (#1565C0)
+            fmt_banco = workbook.add_format({
+                'bold': True, 
+                'font_size': 12, 
+                'font_color': '#1565C0'
+            })
             fmt_grade = workbook.add_format({'border': 1})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
             fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#EAEAEA', 'border': 1})
 
-            # 1. Margens (Respiro visual)
-            worksheet.set_row(0, 15)       # Linha 1 vazia (Margem superior)
-            worksheet.set_column('A:A', 2) # Coluna A vazia (Margem esquerda)
+            # 1. Margens
+            worksheet.set_row(0, 15)       # Linha 1 vazia
+            worksheet.set_column('A:A', 2) # Coluna A vazia
             worksheet.hide_gridlines(2)
 
-            # 2. Título do Banco (Linha 2, mesclado)
+            # 2. Título do Banco (Azul Escuro, Mesclado e sem grade)
             worksheet.merge_range('B2:D2', f"BANCO: {nome_banco}", fmt_banco)
 
             # 3. Ajuste de Colunas
-            worksheet.set_column('B:B', 12) # Data
-            worksheet.set_column('C:C', 45) # Histórico
-            worksheet.set_column('D:D', 15) # Valor
-            worksheet.set_column('E:H', 15) # Extras
+            worksheet.set_column('B:B', 12)
+            worksheet.set_column('C:C', 45)
+            worksheet.set_column('D:D', 15)
+            worksheet.set_column('E:H', 15)
 
-            # 4. Cabeçalho da Tabela (Linha 4)
+            # 4. Cabeçalho da Tabela
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
                 worksheet.write(3, col_num + 1, titulo, fmt_cabecalho)
 
-            # 5. Dados com grade e cores
+            # 5. Dados
             for i, row in df.iterrows():
                 row_idx = i + 4
                 worksheet.write(row_idx, 1, row['Data'], fmt_grade)
@@ -110,7 +115,7 @@ if arquivo_pdf:
                     worksheet.write(row_idx, c, "", fmt_grade)
 
         st.download_button(
-            label="📥 Baixar Planilha Final",
+            label="📥 Baixar Planilha Azulizada",
             data=output.getvalue(),
             file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
