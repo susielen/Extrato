@@ -67,31 +67,30 @@ if arquivo_pdf:
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Dados na aba 'Extrato'
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
             
             workbook = writer.book
             worksheet = writer.sheets['Extrato']
             
             # --- FORMATOS ---
-            # Nome do banco na mesma cor azul escuro do Streamlit (#1565C0)
-            fmt_banco = workbook.add_format({
-                'bold': True, 
-                'font_size': 12, 
-                'font_color': '#1565C0'
-            })
             fmt_grade = workbook.add_format({'border': 1})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
-            fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#EAEAEA', 'border': 1})
+            # Formato Cinza com Borda (usado no Banco e nos Títulos da Tabela)
+            fmt_cabecalho = workbook.add_format({
+                'bold': True, 
+                'bg_color': '#EAEAEA', 
+                'border': 1,
+                'font_color': '#000000'
+            })
 
             # 1. Margens
             worksheet.set_row(0, 15)       # Linha 1 vazia
             worksheet.set_column('A:A', 2) # Coluna A vazia
             worksheet.hide_gridlines(2)
 
-            # 2. Título do Banco (Azul Escuro, Mesclado e sem grade)
-            worksheet.merge_range('B2:D2', f"BANCO: {nome_banco}", fmt_banco)
+            # 2. Título do Banco (Mesclado, Cinza e com Borda)
+            worksheet.merge_range('B2:D2', f"BANCO: {nome_banco}", fmt_cabecalho)
 
             # 3. Ajuste de Colunas
             worksheet.set_column('B:B', 12)
@@ -115,7 +114,7 @@ if arquivo_pdf:
                     worksheet.write(row_idx, c, "", fmt_grade)
 
         st.download_button(
-            label="📥 Baixar Planilha Azulizada",
+            label="📥 Baixar Planilha Final",
             data=output.getvalue(),
             file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
