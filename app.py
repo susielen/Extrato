@@ -15,21 +15,16 @@ def processar_valor_unico(texto_valor):
     except:
         return None
 
-# --- CONFIGURAÇÃO VISUAL AZUL CLARO ---
+# --- LAYOUT STREAMLIT AZUL CLARO ---
 st.set_page_config(page_title="Robô de Extratos", layout="centered")
 
 st.markdown("""
     <style>
     .stApp {
-        background-color: #E3F2FD; 
+        background-color: #E3F2FD !important; 
     }
-    h1 {
-        color: #1565C0; 
-    }
-    .stButton>button {
-        background-color: #1976D2;
-        color: white;
-        border-radius: 10px;
+    .stTextInput>div>div>input {
+        background-color: #ffffff;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -60,27 +55,26 @@ if arquivo_pdf:
                         valor_final = processar_valor_unico(valor_bruto)
                         if valor_final is not None:
                             dados_lista.append({
-                                'Data': data_str,
-                                'Histórico': historico,
-                                'Valor': valor_final,
-                                'Débito': "",
-                                'Crédito': "",
-                                'Complemento': "",
-                                'Descrição': ""
+                                'Data': data_str, 'Histórico': historico, 'Valor': valor_final,
+                                'Débito': "", 'Crédito': "", 'Complemento': "", 'Descrição': ""
                             })
 
     if dados_lista:
         df = pd.DataFrame(dados_lista)
         st.divider()
-        st.write("### ✅ Processamento concluído")
         st.dataframe(df)
 
         output = io.BytesIO()
+        # O segredo para não ter Sheet1 é NÃO usar o df.to_excel direto no início
+        workbook = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # Criamos a aba 'Extrato' primeiro
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
+            
             workbook = writer.book
             worksheet = writer.sheets['Extrato']
             
+            # Formatos
             fmt_negrito = workbook.add_format({'bold': True, 'border': 1})
             fmt_grade = workbook.add_format({'border': 1})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
@@ -92,29 +86,30 @@ if arquivo_pdf:
             worksheet.write('B2', f"BANCO: {nome_banco}", fmt_negrito)
             worksheet.hide_gridlines(2)
 
+            # Ajuste Colunas
             worksheet.set_column('B:B', 12)
             worksheet.set_column('C:C', 45)
             worksheet.set_column('D:D', 15)
             worksheet.set_column('E:H', 15)
 
-            colunas = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
-            for col_num, titulo in enumerate(colunas):
+            # Cabeçalho da tabela
+            titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
+            for col_num, titulo in enumerate(titulos):
                 worksheet.write(3, col_num + 1, titulo, fmt_cabecalho)
 
+            # Dados
             for i, row in df.iterrows():
                 row_idx = i + 4
                 worksheet.write(row_idx, 1, row['Data'], fmt_grade)
                 worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
-                valor = row['Valor']
-                fmt_v = fmt_vermelho if valor < 0 else fmt_verde
-                worksheet.write_number(row_idx, 3, valor, fmt_v)
-                for col_extra in range(4, 8):
-                    worksheet.write(row_idx, col_extra, "", fmt_grade)
+                v = row['Valor']
+                worksheet.write_number(row_idx, 3, v, fmt_vermelho if v < 0 else fmt_verde)
+                for c in range(4, 8): worksheet.write(row_idx, c, "", fmt_grade)
 
-        # AGORA O NOME DO ARQUIVO É APENAS O BANCO
         st.download_button(
             label="📥 Baixar Planilha Final",
             data=output.getvalue(),
             file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+        
