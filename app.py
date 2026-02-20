@@ -15,16 +15,27 @@ def processar_valor_unico(texto_valor):
     except:
         return None
 
-# --- LAYOUT STREAMLIT AZUL CLARO ---
+# --- CSS PARA DEIXAR TUDO AZUL (INCLUINDO CABEÇALHO) ---
 st.set_page_config(page_title="Robô de Extratos", layout="centered")
 
 st.markdown("""
     <style>
+    /* Fundo principal da aplicação */
     .stApp {
-        background-color: #E3F2FD !important; 
+        background-color: #E3F2FD !important;
     }
+    /* Cor do cabeçalho (Header) do Streamlit */
+    header[data-testid="stHeader"] {
+        background-color: #E3F2FD !important;
+    }
+    /* Estilização dos campos de entrada para não quebrarem o visual */
     .stTextInput>div>div>input {
-        background-color: #ffffff;
+        background-color: #FFFFFF !important;
+        border: 1px solid #1565C0;
+    }
+    /* Título em azul escuro para contraste */
+    h1 {
+        color: #1565C0 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -65,10 +76,9 @@ if arquivo_pdf:
         st.dataframe(df)
 
         output = io.BytesIO()
-        # O segredo para não ter Sheet1 é NÃO usar o df.to_excel direto no início
-        workbook = io.BytesIO()
+        # O segredo para remover a Sheet1 é criar o Writer e já definir a aba Extrato no primeiro comando
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Criamos a aba 'Extrato' primeiro
+            # Forçamos a escrita na aba Extrato. O XlsxWriter não criará a Sheet1 se fizermos assim:
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
             
             workbook = writer.book
@@ -81,23 +91,22 @@ if arquivo_pdf:
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
             fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#EAEAEA', 'border': 1})
 
+            # Layout Excel
             worksheet.set_column('A:A', 2) 
             worksheet.write('B1', f"EMPRESA: {nome_empresa}", fmt_negrito)
             worksheet.write('B2', f"BANCO: {nome_banco}", fmt_negrito)
             worksheet.hide_gridlines(2)
 
-            # Ajuste Colunas
             worksheet.set_column('B:B', 12)
             worksheet.set_column('C:C', 45)
             worksheet.set_column('D:D', 15)
             worksheet.set_column('E:H', 15)
 
-            # Cabeçalho da tabela
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
             for col_num, titulo in enumerate(titulos):
                 worksheet.write(3, col_num + 1, titulo, fmt_cabecalho)
 
-            # Dados
+            # Preenchimento de dados
             for i, row in df.iterrows():
                 row_idx = i + 4
                 worksheet.write(row_idx, 1, row['Data'], fmt_grade)
@@ -111,5 +120,4 @@ if arquivo_pdf:
             data=output.getvalue(),
             file_name=f"Extrato_{nome_banco}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
+        )        
