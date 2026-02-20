@@ -4,133 +4,131 @@ import pandas as pd
 import re
 import io
 
-def processar_valor_unico(texto_valor):
-    if not texto_valor: return None
-    t = str(texto_valor).upper().replace(" ", "").replace("R$", "")
-    # Regra: Débito (-) e Crédito (+)
-    e_saida = '-' in t or 'D' in t
-    apenas_numeros = re.sub(r'[^\d,]', '', t)
+def limpar_texto_caixa(texto):
+    if not texto: return ""
+    # Remove aspas e quebras de linha que o PDF da Caixa insere no meio das palavras
+    return str(texto).replace('"', '').replace('\n', ' ').replace('\r', '').strip()
+
+def processar_valor_universal(valor_texto):
+    t = limpar_texto_caixa(valor_texto).upper()
+    if not t or t == "0,00" or "SALDO" in t: return None
+    
+    # Regra que você me passou: Credito é positivo, Debito é negativo
+    # No seu arquivo da Caixa: "0,01 C" ou "100,00 D"
+    e_saida = 'D' in t or '-' in t
+    
+    # Mantém apenas números e a pontuação
+    num = re.sub(r'[^\d,.]', '', t)
     try:
-        valor_float = float(apenas_numeros.replace(',', '.'))
-        return -valor_float if e_saida else valor_float
+        if ',' in num and '.' in num: num = num.replace('.', '').replace(',', '.')
+        elif ',' in num: num = num.replace(',', '.')
+        res = float(num)
+        return -res if e_saida else res
     except:
         return None
 
-# --- CSS PARA AZUL TOTAL NO STREAMLIT ---
-st.set_page_config(page_title="Robô de Extratos", layout="centered")
+# --- CONFIGURAÇÃO VISUAL (AZUL E ORGANIZADO) ---
+st.set_page_config(page_title="Robô de Extratos Profissional", layout="centered")
+st.markdown("<style>.stApp {background-color: #E3F2FD;}</style>", unsafe_allow_html=True)
 
-st.markdown("""
-    <style>
-    .stApp, header[data-testid="stHeader"], [data-testid="stToolbar"] {
-        background-color: #E3F2FD !important;
-    }
-    .stTextInput>div>div>input {
-        background-color: #FFFFFF !important;
-        border: 1px solid #1565C0;
-    }
-    h1 { color: #1565C0 !important; }
-    </style>
-    """, unsafe_allow_html=True)
-
-st.title("🤖 Conversor de Extrato Bancário")
-
-nome_banco = st.text_input("Nome do Banco", "Banco Santander")
+st.title("🤖 Conversor de Extratos v12")
+st.info("Compatível com Santander e o modelo CSV/PDF da Caixa.")
 
 arquivo_pdf = st.file_uploader("Selecione o arquivo PDF", type=["pdf"])
 
 if arquivo_pdf:
     dados_lista = []
+    regex_data = r'(\d{2}/\d{2}/\d{4})'
+
     with pdfplumber.open(arquivo_pdf) as pdf:
         for pagina in pdf.pages:
-            texto = pagina.extract_text()
-            if not texto: continue
-            for linha in texto.split('\n'):
-                match_data = re.search(r'^(\d{2}/\d{2}(?:/\d{4})?)', linha.strip())
+            texto_bruto = pagina.extract_text()
+            if not texto_bruto: continue
+            
+            # Divide o texto em linhas
+            linhas = texto_bruto.split('\n')
+            for linha in linhas:
+                match_data = re.search(regex_data, linha)
                 if match_data:
-                    data_str = match_data.group(1)
-                    resto = linha.replace(data_str, "").strip()
-                    partes = resto.split()
-                    if len(partes) >= 2:
-                        valor_bruto = partes[-1]
+                    data_f = match_data.group(1)
+                    
+                    # TENTATIVA 1: Lógica para o formato da Caixa (separado por vírgula e aspas)
+                    if '","' in linha or '",' in linha:
+                        # Limpamos a linha de aspas e quebras de linha antes de dividir
+                        linha_limpa = linha.replace('"', '').replace('\n', '')
+                        partes = [p.strip() for p in linha_limpa.split(',')]
                         
-                        # Limpeza do histórico
-                        historico = " ".join(partes[:-1]).strip()
-                        if historico.endswith("-"):
-                            historico = historico[:-1].strip()
-                        historico = historico.upper()
-                        
-                        valor_final = processar_valor_unico(valor_bruto)
-                        if valor_final is not None:
-                            dados_lista.append({
-                                'Data': data_str, 'Histórico': historico, 'Valor': valor_final,
-                                'Débito': "", 'Crédito': "", 'Complemento': "", 'Descrição': ""
-                            })
+                        if len(partes) >= 3:
+                            # No seu arquivo, Histórico é a 3ª parte e Valor é a 6ª ou última que contém C/D
+                            historico = partes[2].upper()
+                            valor_bruto = ""
+                            for p in reversed(partes):
+                                if ' C' in p.upper() or ' D' in p.upper():
+                                    valor_bruto = p
+                                    break
+                            v_final = processar_valor_universal(valor_bruto)
+                        else: v_final = None
+                    
+                    # TENTATIVA 2: Lógica para Santander (espaços comuns)
+                    else:
+                        corpo = linha.replace(data_f, "").strip()
+                        partes = corpo.split()
+                        if len(partes) >= 2:
+                            valor_bruto = partes[-1]
+                            historico = " ".join(partes[:-1]).strip().upper()
+                            if historico.endswith("-"): historico = historico[:-1].strip()
+                            v_final = processar_valor_universal(valor_bruto)
+                        else: v_final = None
+
+                    # Só adiciona se o valor for real (ignora saldos e zeros)
+                    if v_final is not None and v_final != 0:
+                        dados_lista.append({
+                            'Data': data_f,
+                            'Histórico': historico,
+                            'Valor': v_final
+                        })
 
     if dados_lista:
         df = pd.DataFrame(dados_lista)
-        st.divider()
+        st.success(f"Encontramos {len(df)} lançamentos!")
         st.dataframe(df)
 
+        # GERAÇÃO DO EXCEL PERSONALIZADO
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, startrow=3, startcol=1, sheet_name='Extrato')
+            workbook, worksheet = writer.book, writer.sheets['Extrato']
             
-            workbook = writer.book
-            worksheet = writer.sheets['Extrato']
-            
-            # --- FORMATOS ---
+            # Formatos de Célula
             fmt_grade = workbook.add_format({'border': 1})
             fmt_data = workbook.add_format({'border': 1, 'align': 'center'})
             fmt_verde = workbook.add_format({'font_color': '#008000', 'num_format': '#,##0.00', 'border': 1})
             fmt_vermelho = workbook.add_format({'font_color': '#FF0000', 'num_format': '#,##0.00', 'border': 1})
-            fmt_cabecalho = workbook.add_format({
-                'bold': True, 'bg_color': '#EAEAEA', 'border': 1,
-                'font_color': '#000000', 'align': 'center', 'valign': 'vcenter'
-            })
+            fmt_cabecalho = workbook.add_format({'bold': True, 'bg_color': '#D9EAD3', 'border': 1, 'align': 'center'})
 
-            # 1. Margens e Título do Banco
-            worksheet.set_row(0, 15)       
-            worksheet.set_column('A:A', 2) 
-            worksheet.hide_gridlines(2)
-            worksheet.merge_range('B2:C2', f"BANCO: {nome_banco}", fmt_cabecalho)
+            # Configurações de Coluna
+            worksheet.set_column('B:B', 12) # Data
+            worksheet.set_column('C:C', 45) # Histórico
+            worksheet.set_column('D:D', 15) # Valor
+            worksheet.set_column('E:H', 20) # Outras colunas
 
-            # 2. Ajuste de Colunas
-            worksheet.set_column('B:B', 12) 
-            worksheet.set_column('C:C', 45) 
-            worksheet.set_column('D:D', 15) 
-            worksheet.set_column('E:H', 25) 
-
-            # 3. Cabeçalho com Notas
+            # Adicionando as Notas (Com o tamanho que você pediu para ler tudo)
+            prop_nota = {'width': 300, 'height': 80}
             titulos = ["Data", "Histórico", "Valor", "Débito", "Crédito", "Complemento", "Descrição"]
-            for col_num, titulo in enumerate(titulos):
-                col_idx = col_num + 1
-                worksheet.write(3, col_idx, titulo, fmt_cabecalho)
-                
-                if titulo == "Débito" or titulo == "Crédito":
-                    worksheet.write_comment(3, col_idx, 'Escritório, coloque aqui o código reduzido do plano de contas que você utiliza no seu sistema.')
-                elif titulo == "Complemento":
-                    worksheet.write_comment(3, col_idx, 'Coloque aqui o início do seu histórico ou um histórico padrão. Por exemplo: PAGAMENTO DE OU RECEBIMENTO DE')
-                elif titulo == "Descrição":
-                    worksheet.write_comment(3, col_idx, 'Coloque aqui a fórmula: =CONCAT(selecione_complemento; selecione_historico) e arraste para abaixo.')
+            for i, tit in enumerate(titulos):
+                worksheet.write(3, i+1, tit, fmt_cabecalho)
+                if tit == "Descrição":
+                    worksheet.write_comment(3, i+1, 'Fórmula: =MAIÚSCULA(CONCAT(G4; " "; C4))', prop_nota)
 
-            # 4. Dados (Descrição Vazia com Grade)
+            # Preenchendo os dados com cores
             for i, row in df.iterrows():
-                row_idx = i + 4
-                worksheet.write(row_idx, 1, row['Data'], fmt_data)
-                worksheet.write(row_idx, 2, row['Histórico'], fmt_grade)
-                
+                r = i + 4
+                worksheet.write(r, 1, row['Data'], fmt_data)
+                worksheet.write(r, 2, row['Histórico'], fmt_grade)
                 v = row['Valor']
-                fmt_v = fmt_vermelho if v < 0 else fmt_verde
-                worksheet.write_number(row_idx, 3, v, fmt_v)
-                
-                # Colunas de E até H (Débito, Crédito, Complemento, Descrição) vazias com grade
-                for col_extra in range(4, 8):
-                    worksheet.write(row_idx, col_extra, "", fmt_grade)
+                worksheet.write_number(r, 3, v, fmt_vermelho if v < 0 else fmt_verde)
+                for c in range(4, 8): worksheet.write(r, c, "", fmt_grade)
 
-        st.download_button(
-            label="📥 Baixar Planilha Final",
-            data=output.getvalue(),
-            file_name=f"Extrato_{nome_banco}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
+        st.download_button("📥 Baixar Planilha Pronta", output.getvalue(), "Extrato_Formatado.xlsx")
+    else:
+        st.error("Não foi possível ler este modelo de PDF. Tente baixar o extrato original em PDF no site do banco.")
